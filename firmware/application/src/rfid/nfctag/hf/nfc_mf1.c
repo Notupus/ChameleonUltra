@@ -1134,10 +1134,37 @@ int nfc_tag_mf1_data_loadcb(tag_specific_type_t type, tag_data_buffer_t *buffer)
 
 // Factory data for initialization of MF1
 bool nfc_tag_mf1_data_factory(uint8_t slot, tag_specific_type_t tag_type) {
-    // default mf1 data
+    // default mf1 data - UID bytes 0-3, BCC byte 4, SAK byte 5, ATQA bytes 6-7, manufacturer data bytes 8-15
     uint8_t default_blk0[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0x22, 0x08, 0x04, 0x00, 0x01, 0x77, 0xA2, 0xCC, 0x35, 0xAF, 0xA5, 0x1D };
     uint8_t default_data[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
     uint8_t default_trail[] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x07, 0x80, 0x69, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+
+    // Set correct SAK and ATQA in block 0 based on tag type
+    uint8_t sak;
+    uint8_t atqa0;
+    switch (tag_type) {
+        case TAG_TYPE_MIFARE_Mini:
+            sak = 0x09;     // SAK for MIFARE Mini
+            atqa0 = 0x04;   // ATQA for MIFARE Mini
+            break;
+        case TAG_TYPE_MIFARE_2048:
+            sak = 0x08;     // SAK for MIFARE 2K (same as 1K)
+            atqa0 = 0x04;   // ATQA for MIFARE 2K
+            break;
+        case TAG_TYPE_MIFARE_4096:
+            sak = 0x18;     // SAK for MIFARE 4K
+            atqa0 = 0x02;   // ATQA for MIFARE 4K
+            break;
+        case TAG_TYPE_MIFARE_1024:
+        default:
+            sak = 0x08;     // SAK for MIFARE 1K
+            atqa0 = 0x04;   // ATQA for MIFARE 1K
+            break;
+    }
+
+    // Update block 0 with correct SAK and ATQA for this card type
+    default_blk0[5] = sak;
+    default_blk0[6] = atqa0;
 
     // default mf1 info
     nfc_tag_mf1_information_t mf1_tmp_information;
@@ -1154,10 +1181,10 @@ bool nfc_tag_mf1_data_factory(uint8_t slot, tag_specific_type_t tag_type) {
         }
     }
 
-    // default mf1 auto ant-collision res
-    p_mf1_information->res_coll.atqa[0] = 0x04;
+    // default mf1 auto ant-collision res with correct values for tag type
+    p_mf1_information->res_coll.atqa[0] = atqa0;
     p_mf1_information->res_coll.atqa[1] = 0x00;
-    p_mf1_information->res_coll.sak[0] = 0x08;
+    p_mf1_information->res_coll.sak[0] = sak;
     p_mf1_information->res_coll.uid[0] = 0xDE;
     p_mf1_information->res_coll.uid[1] = 0xAD;
     p_mf1_information->res_coll.uid[2] = 0xBE;
