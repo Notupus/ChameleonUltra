@@ -1393,6 +1393,12 @@ class HF14AScan(ReaderRequiredUnit):
         
         # ISO 14443-4 T=CL I-block sequence number
         block_number = [0]  # Using list to allow modification in nested function
+        session_active = [False]  # Track if we have an active T=CL session
+        
+        def reset_session():
+            """Reset T=CL session state"""
+            block_number[0] = 0
+            session_active[0] = False
         
         def wrap_apdu(apdu):
             """Wrap APDU in ISO 14443-4 I-block"""
@@ -1418,46 +1424,50 @@ class HF14AScan(ReaderRequiredUnit):
                 # Might be direct response (no T=CL wrapping)
                 return resp
         
-        def send_apdu_debug(apdu, options, timeout=300, label="APDU"):
-            """Send APDU and show debug output"""
+        def send_apdu_tcl(apdu, timeout=300, label="APDU", new_session=False):
+            """Send APDU with T=CL wrapping, maintaining session state"""
             try:
-                # Try without wrapping first (direct APDU)
-                print(f"  # Sending {label}: {apdu.hex().upper()}")
-                try:
-                    resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=apdu)
-                    if resp is not None and len(resp) > 0:
-                        print(f"  # Response (direct): {resp.hex().upper()}")
-                        return resp
-                    else:
-                        print(f"  # No response (direct), trying T=CL...")
-                except Exception as e:
-                    print(f"  # Direct APDU error: {e}")
+                if new_session or not session_active[0]:
+                    # Start new session - need to select card and do RATS
+                    reset_session()
+                    options = {
+                        'activate_rf_field': 1,
+                        'wait_response': 1,
+                        'append_crc': 1,
+                        'auto_select': 1,  # Does REQA + ANTICOL + SELECT + RATS
+                        'keep_rf_field': 1,
+                        'check_response_crc': 1,
+                    }
+                else:
+                    # Continue existing session - don't re-select
+                    options = {
+                        'activate_rf_field': 0,  # RF already on
+                        'wait_response': 1,
+                        'append_crc': 1,
+                        'auto_select': 0,  # Don't re-select - would break T=CL session!
+                        'keep_rf_field': 1,
+                        'check_response_crc': 1,
+                    }
                 
-                # Need to re-select card for second attempt
-                options_copy = dict(options)
-                options_copy['activate_rf_field'] = 1
-                options_copy['auto_select'] = 1
-                
-                # Try with I-block wrapping
                 wrapped = wrap_apdu(apdu)
-                print(f"  # Sending {label} (T=CL): {wrapped.hex().upper()}")
-                try:
-                    resp = self.cmd.hf14a_raw(options=options_copy, resp_timeout_ms=timeout, data=wrapped)
-                    if resp is not None and len(resp) > 0:
-                        print(f"  # Response (T=CL): {resp.hex().upper()}")
-                        unwrapped = unwrap_response(resp)
-                        if unwrapped is not None:
-                            print(f"  # Unwrapped: {unwrapped.hex().upper()}")
-                        return unwrapped
-                    else:
-                        print(f"  # No response (T=CL)")
-                except Exception as e:
-                    print(f"  # T=CL APDU error: {e}")
+                print(f"  # Sending {label}: PCB={wrapped[0]:02X} APDU={apdu.hex().upper()}")
                 
-                print(f"  # No valid response")
-                return None
+                resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=wrapped)
+                
+                if resp is not None and len(resp) > 0:
+                    print(f"  # Response: {resp.hex().upper()}")
+                    session_active[0] = True  # Session is now active
+                    unwrapped = unwrap_response(resp)
+                    if unwrapped is not None and len(unwrapped) > 0:
+                        return unwrapped
+                    return None
+                else:
+                    print(f"  # No response")
+                    session_active[0] = False  # Session lost
+                    return None
             except Exception as e:
-                print(f"  # send_apdu_debug exception: {e}")
+                print(f"  # Error: {e}")
+                session_active[0] = False  # Session lost
                 return None
         
         # Known payment application AIDs
@@ -1709,15 +1719,6 @@ class HF14AScan(ReaderRequiredUnit):
                         return bank_bins[prefix]
             return None
         
-        options = {
-            'activate_rf_field': 1,
-            'wait_response': 1,
-            'append_crc': 1,
-            'auto_select': 1,
-            'keep_rf_field': 1,
-            'check_response_crc': 1,
-        }
-        
         found_apps = []
         card_info = {}
         
@@ -1727,8 +1728,8 @@ class HF14AScan(ReaderRequiredUnit):
             ppse_name = bytes([0x32, 0x50, 0x41, 0x59, 0x2E, 0x53, 0x59, 0x53, 0x2E, 0x44, 0x44, 0x46, 0x30, 0x31])  # 2PAY.SYS.DDF01
             select_ppse = bytes([0x00, 0xA4, 0x04, 0x00, len(ppse_name)]) + ppse_name + bytes([0x00])
             
-            # Use debug send
-            resp = send_apdu_debug(select_ppse, options, timeout=300, label="SELECT PPSE")
+            # Start new T=CL session for PPSE
+            resp = send_apdu_tcl(select_ppse, timeout=300, label="SELECT PPSE", new_session=True)
             
             if resp is None or len(resp) < 2:
                 print("  # No valid response from PPSE selection")
@@ -1741,13 +1742,11 @@ class HF14AScan(ReaderRequiredUnit):
             if sw1 != 0x90 or sw2 != 0x00:
                 # Try direct AID selection instead
                 print("  # PPSE not found, trying direct AID selection...")
-                options['activate_rf_field'] = 1
-                options['auto_select'] = 1
                 
                 # Try Visa
                 visa_aid = bytes.fromhex('A0000000031010')
                 select_visa = bytes([0x00, 0xA4, 0x04, 0x00, len(visa_aid)]) + visa_aid + bytes([0x00])
-                resp = send_apdu_debug(select_visa, options, timeout=300, label="SELECT Visa")
+                resp = send_apdu_tcl(select_visa, timeout=300, label="SELECT Visa", new_session=True)
                 
                 if resp is not None and len(resp) >= 2:
                     sw1, sw2 = resp[-2], resp[-1]
@@ -1758,10 +1757,9 @@ class HF14AScan(ReaderRequiredUnit):
                 
                 if not found_apps:
                     # Try Mastercard
-                    options['activate_rf_field'] = 1
                     mc_aid = bytes.fromhex('A0000000041010')
                     select_mc = bytes([0x00, 0xA4, 0x04, 0x00, len(mc_aid)]) + mc_aid + bytes([0x00])
-                    resp = send_apdu_debug(select_mc, options, timeout=300, label="SELECT Mastercard")
+                    resp = send_apdu_tcl(select_mc, timeout=300, label="SELECT Mastercard", new_session=True)
                     
                     if resp is not None and len(resp) >= 2:
                         sw1, sw2 = resp[-2], resp[-1]
@@ -1787,8 +1785,11 @@ class HF14AScan(ReaderRequiredUnit):
                     print(f"  # Found AID: {aid}")
             
             # If we found AIDs from PPSE, try to select and read each app
-            # Also try common AIDs directly too
-            aids_to_try = list(set(found_apps + ['A0000000031010', 'A0000000041010', 'A00000002501']))
+            # Try found AID first, then other common AIDs
+            aids_to_try = found_apps.copy()
+            for common_aid in ['A0000000041010', 'A0000000031010', 'A00000002501']:
+                if common_aid not in aids_to_try:
+                    aids_to_try.append(common_aid)
             
             for aid_hex in aids_to_try:
                 if aid_hex in [c.get('aid') for c in [card_info] if 'aid' in c]:
@@ -1797,15 +1798,21 @@ class HF14AScan(ReaderRequiredUnit):
                     aid_bytes = bytes.fromhex(aid_hex)
                     select_aid = bytes([0x00, 0xA4, 0x04, 0x00, len(aid_bytes)]) + aid_bytes + bytes([0x00])
                     
-                    options['activate_rf_field'] = 0  # Already activated
-                    resp = send_apdu_debug(select_aid, options, timeout=300, label=f"SELECT AID {aid_hex}")
+                    # Continue in same session if active, otherwise start new
+                    resp = send_apdu_tcl(select_aid, timeout=300, label=f"SELECT AID {aid_hex}")
                     
                     if resp is None or len(resp) < 2:
-                        continue
+                        # Session may have been lost, try with new session
+                        resp = send_apdu_tcl(select_aid, timeout=300, label=f"SELECT AID {aid_hex} (retry)", new_session=True)
+                        if resp is None or len(resp) < 2:
+                            continue
                     
                     sw1, sw2 = resp[-2], resp[-1]
-                    if sw1 != 0x90 and sw2 != 0x00:
+                    if not (sw1 == 0x90 and sw2 == 0x00):
+                        print(f"  # AID {aid_hex}: SW={sw1:02X}{sw2:02X}")
                         continue
+                    
+                    print(f"  # AID {aid_hex}: SUCCESS!")
                     
                     # Parse FCI response
                     fci_data = resp[:-2]
@@ -1839,7 +1846,7 @@ class HF14AScan(ReaderRequiredUnit):
                     gpo_data = bytes([0x83, 0x00])  # Minimal PDOL
                     gpo_cmd = bytes([0x80, 0xA8, 0x00, 0x00, len(gpo_data)]) + gpo_data + bytes([0x00])
                     
-                    gpo_resp = send_apdu_debug(gpo_cmd, options, timeout=300, label="GPO")
+                    gpo_resp = send_apdu_tcl(gpo_cmd, timeout=300, label="GPO")
                     
                     afl = None
                     if gpo_resp and len(gpo_resp) >= 2:
@@ -1866,7 +1873,7 @@ class HF14AScan(ReaderRequiredUnit):
                                 p2 = (sfi << 3) | 0x04
                                 read_cmd = bytes([0x00, 0xB2, rec, p2, 0x00])
                                 
-                                rec_resp = send_apdu_debug(read_cmd, options, timeout=200, label=f"READ REC {rec}")
+                                rec_resp = send_apdu_tcl(read_cmd, timeout=200, label=f"READ REC {rec}")
                                 
                                 if rec_resp and len(rec_resp) >= 2:
                                     rec_sw1, rec_sw2 = rec_resp[-2], rec_resp[-1]
