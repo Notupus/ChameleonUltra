@@ -534,18 +534,6 @@ static const uint8_t rainbow_sequence[] = {0, 7, 3, 8, 1, 12, 4, 9, 2, 10, 5, 11
 #define RAINBOW_LEN 12
 
 /**
- * @brief Set RGB color using PWM values for smooth color mixing
- */
-static void set_pwm_color(const rgb_pwm_color_t *color) {
-    // Use PWM for smooth color control
-    // Lower value = brighter (inverted logic)
-    pwm_sequ_val.channel_0 = color->r;  
-    pwm_sequ_val.channel_1 = color->g;
-    pwm_sequ_val.channel_2 = color->b;
-    pwm_sequ_val.channel_3 = 1000; // Unused
-}
-
-/**
  * @brief Set RGB color with brightness level (0-99)
  */
 static void set_pwm_color_brightness(const rgb_pwm_color_t *color, uint8_t brightness) {
@@ -555,19 +543,6 @@ static void set_pwm_color_brightness(const rgb_pwm_color_t *color, uint8_t brigh
     pwm_sequ_val.channel_1 = 1000 - ((1000 - color->g) * scale / 99);
     pwm_sequ_val.channel_2 = 1000 - ((1000 - color->b) * scale / 99);
     pwm_sequ_val.channel_3 = 1000;
-}
-
-/**
- * @brief Interpolate between two PWM colors
- * @param c1 First color
- * @param c2 Second color  
- * @param t Interpolation factor 0-255 (0=c1, 255=c2)
- * @param out Output color
- */
-static void interpolate_color(const rgb_pwm_color_t *c1, const rgb_pwm_color_t *c2, uint8_t t, rgb_pwm_color_t *out) {
-    out->r = c1->r + (((int32_t)(c2->r - c1->r)) * t / 255);
-    out->g = c1->g + (((int32_t)(c2->g - c1->g)) * t / 255);
-    out->b = c1->b + (((int32_t)(c2->b - c1->b)) * t / 255);
 }
 
 /**

@@ -1697,9 +1697,16 @@ class HF14AScan(ReaderRequiredUnit):
             # Try with T=CL wrapping first
             resp = send_apdu(select_ppse, options, timeout=300, use_tcl=True)
             
+            # Debug: show raw response
+            raw_resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=300, data=select_ppse)
+            if raw_resp is not None:
+                print(f"- EMV Debug: Raw PPSE response: {raw_resp.hex().upper() if raw_resp else 'None'}")
+            
             if resp is None or len(resp) < 2:
                 # Try without T=CL wrapping (some cards may not need it)
                 block_number[0] = 0  # Reset block number
+                options['activate_rf_field'] = 1  # Need to re-select
+                options['auto_select'] = 1
                 resp = send_apdu(select_ppse, options, timeout=300, use_tcl=False)
                 if resp is not None and len(resp) >= 2:
                     use_tcl = False
@@ -1711,8 +1718,8 @@ class HF14AScan(ReaderRequiredUnit):
             # Check for successful response (SW1 SW2 = 90 00)
             sw1, sw2 = resp[-2], resp[-1]
             if sw1 != 0x90 or sw2 != 0x00:
-                # PPSE not found - not a contactless payment card
-                # Could be DESFire, ACOS, or other ISO14443-4 card
+                # PPSE not found - try PSE for contact cards that might respond
+                print(f"- EMV Debug: PPSE SW={sw1:02X}{sw2:02X}")
                 return
             
             # Parse PPSE response
