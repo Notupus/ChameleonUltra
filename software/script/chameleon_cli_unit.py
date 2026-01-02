@@ -1416,7 +1416,7 @@ class HF14AScan(ReaderRequiredUnit):
                 return False
             return resp[-2] in [0x90, 0x61, 0x62, 0x63, 0x64, 0x65, 0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F]
         
-        def send_apdu(apdu, timeout=300, label="APDU", retries=2):
+        def send_apdu(apdu, timeout=300, label="APDU", retries=2, quiet=False):
             """Send APDU to card with retry logic for unreliable connections"""
             import time
             
@@ -1429,23 +1429,26 @@ class HF14AScan(ReaderRequiredUnit):
                 'check_response_crc': 1,
             }
             
-            print(f"  # Sending {label}: {apdu.hex().upper()}")
+            if not quiet:
+                print(f"  # Sending {label}: {apdu.hex().upper()}")
             
             for attempt in range(retries + 1):
                 if attempt > 0:
                     # Small delay between retries to let card settle
-                    time.sleep(0.05)
-                    print(f"  # Retry attempt {attempt}...")
+                    time.sleep(0.08)
+                    if not quiet:
+                        print(f"  # Retry attempt {attempt}...")
                 
                 # If we already know which mode works, try it first
                 if use_tcl_wrap[0] == False:
                     try:
                         resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=apdu)
                         if resp is not None and is_valid_sw(resp):
-                            print(f"  # Response: {resp.hex().upper()}")
+                            if not quiet:
+                                print(f"  # Response: {resp.hex().upper()}")
                             return resp
                     except Exception as e:
-                        if attempt == retries:
+                        if attempt == retries and not quiet:
                             print(f"  # Error: {e}")
                 elif use_tcl_wrap[0] == True:
                     try:
@@ -1456,45 +1459,47 @@ class HF14AScan(ReaderRequiredUnit):
                         if resp is not None and len(resp) > 0:
                             unwrapped = unwrap_response(resp)
                             if unwrapped and is_valid_sw(unwrapped):
-                                print(f"  # Response: {unwrapped.hex().upper()}")
+                                if not quiet:
+                                    print(f"  # Response: {unwrapped.hex().upper()}")
                                 return unwrapped
                     except Exception as e:
-                        if attempt == retries:
+                        if attempt == retries and not quiet:
                             print(f"  # Error: {e}")
                 else:
                     # Try raw APDU first
                     try:
                         resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=apdu)
                         if resp is not None and is_valid_sw(resp):
-                            print(f"  # Response: {resp.hex().upper()}")
+                            if not quiet:
+                                print(f"  # Response: {resp.hex().upper()}")
                             use_tcl_wrap[0] = False
                             return resp
                         # Check if response has PCB prefix
                         if resp is not None:
                             unwrapped = unwrap_response(resp)
                             if unwrapped and is_valid_sw(unwrapped):
-                                print(f"  # Response: {unwrapped.hex().upper()}")
+                                if not quiet:
+                                    print(f"  # Response: {unwrapped.hex().upper()}")
                                 use_tcl_wrap[0] = True
                                 return unwrapped
                     except Exception as e:
-                        if attempt == retries:
+                        if attempt == retries and not quiet:
                             print(f"  # Raw APDU error: {e}")
                     
                     # Try with T=CL wrapping - reset block number for fresh start
                     try:
                         block_number[0] = 0
                         wrapped = wrap_apdu_tcl(apdu)
-                        if attempt == retries:
-                            print(f"  # Retry with T=CL wrap: PCB={wrapped[0]:02X}")
                         resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=wrapped)
                         if resp is not None and len(resp) > 0:
                             unwrapped = unwrap_response(resp)
                             if unwrapped and is_valid_sw(unwrapped):
-                                print(f"  # Response: {unwrapped.hex().upper()}")
+                                if not quiet:
+                                    print(f"  # Response: {unwrapped.hex().upper()}")
                                 use_tcl_wrap[0] = True
                                 return unwrapped
                     except Exception as e:
-                        if attempt == retries:
+                        if attempt == retries and not quiet:
                             print(f"  # T=CL APDU error: {e}")
             
             return None
@@ -1840,25 +1845,31 @@ class HF14AScan(ReaderRequiredUnit):
                 if common_aid not in aids_to_try:
                     aids_to_try.append(common_aid)
             
+            # If we already have info from PPSE, be quieter about AID selection attempts
+            have_ppse_info = 'network' in card_info or 'app_label' in card_info
+            
             aid_selected = False
-            for aid_hex in aids_to_try:
+            for idx, aid_hex in enumerate(aids_to_try):
                 if aid_selected:
                     break
                 try:
                     aid_bytes = bytes.fromhex(aid_hex)
                     select_aid = bytes([0x00, 0xA4, 0x04, 0x00, len(aid_bytes)]) + aid_bytes + bytes([0x00])
                     
-                    resp = send_apdu(select_aid, timeout=300, label=f"SELECT AID {aid_hex}")
+                    # First AID (from PPSE) gets verbose output, rest are quiet if we have PPSE info
+                    is_quiet = have_ppse_info and idx > 0
+                    resp = send_apdu(select_aid, timeout=300, label=f"SELECT AID {aid_hex}", quiet=is_quiet)
                     
                     if resp is None or len(resp) < 2:
                         continue
                     
                     sw1, sw2 = resp[-2], resp[-1]
                     if not (sw1 == 0x90 and sw2 == 0x00):
-                        print(f"  # AID {aid_hex}: SW={sw1:02X}{sw2:02X}")
+                        if not is_quiet:
+                            print(f"  # AID {aid_hex}: SW={sw1:02X}{sw2:02X}")
                         continue
                     
-                    print(f"  # AID {aid_hex}: SUCCESS!")
+                    print(f"  # AID {aid_hex}: Selected successfully")
                     aid_selected = True
                     
                     # Parse FCI response
@@ -1893,7 +1904,7 @@ class HF14AScan(ReaderRequiredUnit):
                     gpo_data = bytes([0x83, 0x00])  # Minimal PDOL
                     gpo_cmd = bytes([0x80, 0xA8, 0x00, 0x00, len(gpo_data)]) + gpo_data + bytes([0x00])
                     
-                    gpo_resp = send_apdu(gpo_cmd, timeout=300, label="GPO")
+                    gpo_resp = send_apdu(gpo_cmd, timeout=300, label="GPO", quiet=True)
                     
                     afl = None
                     if gpo_resp and len(gpo_resp) >= 2:
@@ -1920,7 +1931,7 @@ class HF14AScan(ReaderRequiredUnit):
                                 p2 = (sfi << 3) | 0x04
                                 read_cmd = bytes([0x00, 0xB2, rec, p2, 0x00])
                                 
-                                rec_resp = send_apdu(read_cmd, timeout=200, label=f"READ REC {rec}")
+                                rec_resp = send_apdu(read_cmd, timeout=200, label=f"READ REC {rec}", quiet=True)
                                 
                                 if rec_resp and len(rec_resp) >= 2:
                                     rec_sw1, rec_sw2 = rec_resp[-2], rec_resp[-1]
