@@ -988,13 +988,23 @@ class HF14AScan(ReaderRequiredUnit):
             if version is not None and len(version) == 8:
                 print(f"- GET_VERSION: {version.hex().upper()}")
                 
-                vendor_id = version[0]
-                prod_type = version[1]
-                prod_subtype = version[2]
-                major_ver = version[3]
-                minor_ver = version[4]
-                storage_size = version[5]
-                protocol_type = version[6]
+                # GET_VERSION response format (8 bytes):
+                # Byte 0: Fixed header (0x00)
+                # Byte 1: Vendor ID (0x04 = NXP)
+                # Byte 2: Product type (0x03 = Ultralight, 0x04 = NTAG)
+                # Byte 3: Product subtype
+                # Byte 4: Major product version
+                # Byte 5: Minor product version
+                # Byte 6: Storage size
+                # Byte 7: Protocol type
+                header = version[0]
+                vendor_id = version[1]
+                prod_type = version[2]
+                prod_subtype = version[3]
+                major_ver = version[4]
+                minor_ver = version[5]
+                storage_size = version[6]
+                protocol_type = version[7]
                 
                 # Look up specific tag in version map
                 version_key = (vendor_id, prod_type, prod_subtype, major_ver, minor_ver, storage_size, protocol_type)
