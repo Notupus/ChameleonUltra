@@ -1417,65 +1417,82 @@ class HF14AScan(ReaderRequiredUnit):
                 return False
             return resp[-2] in [0x90, 0x61, 0x62, 0x63, 0x64, 0x65, 0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F]
         
-        def send_apdu(apdu, timeout=300, label="APDU", retries=2, quiet=False):
-            """Send APDU to card with retry logic for unreliable connections"""
+        def send_apdu(apdu, timeout=500, label="APDU", retries=3, quiet=False):
+            """Send APDU with proper ISO14443-4 handling including WTX"""
             import time
             
-            # When in quiet mode, reduce retries - we're just trying for bonus info
-            actual_retries = 1 if quiet else retries
+            actual_retries = 0 if quiet else retries
             
             print(f"  # Sending {label}: {apdu.hex().upper()}")
             
             for attempt in range(actual_retries + 1):
                 if attempt > 0:
-                    # Delay and reset session state for retry
-                    time.sleep(0.1)
-                    session_active[0] = False
-                    block_number[0] = 0
+                    time.sleep(0.15)
                     if not quiet:
                         print(f"  # Retry attempt {attempt}...")
                 
                 try:
-                    # Build options based on session state
-                    if session_active[0]:
-                        # Session active - don't re-select, just keep field and send
-                        options = {
-                            'activate_rf_field': 0,  # Field already on
-                            'wait_response': 1,
-                            'append_crc': 1,
-                            'auto_select': 0,  # DON'T re-select - breaks session!
-                            'keep_rf_field': 1,
-                            'check_response_crc': 1,
-                        }
-                    else:
-                        # Start new session - activate field and select
-                        options = {
-                            'activate_rf_field': 1,
-                            'wait_response': 1,
-                            'append_crc': 1,
-                            'auto_select': 1,  # Select card (includes RATS)
-                            'keep_rf_field': 1,
-                            'check_response_crc': 1,
-                        }
-                        block_number[0] = 0  # Reset block number for new session
+                    # Start with I-block PCB (block number 0 for fresh session)
+                    pcb = 0x02
+                    wrapped = bytes([pcb]) + apdu
                     
-                    # Wrap APDU in I-block
-                    wrapped = wrap_apdu_tcl(apdu)
+                    options = {
+                        'activate_rf_field': 1,
+                        'wait_response': 1,
+                        'append_crc': 1,
+                        'auto_select': 1,  # Fresh select each attempt
+                        'keep_rf_field': 1,
+                        'check_response_crc': 1,
+                    }
+                    
                     resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=wrapped)
                     
-                    if resp is not None and len(resp) > 0:
-                        # Session is now active
-                        session_active[0] = True
-                        unwrapped = unwrap_response(resp)
-                        if unwrapped and is_valid_sw(unwrapped):
-                            print(f"  # Response: {unwrapped.hex().upper()}")
-                            return unwrapped
-                        elif unwrapped:
-                            # Got response but not valid SW - still show it
-                            print(f"  # Response: {unwrapped.hex().upper()}")
+                    if resp is None or len(resp) < 1:
+                        continue
+                    
+                    # Handle WTX (Waiting Time Extension) - card needs more time
+                    # S-block format: 11xx xxxx - WTX is specifically 0xF2 (1111 0010)
+                    wtx_count = 0
+                    while resp is not None and len(resp) >= 2 and resp[0] == 0xF2 and wtx_count < 10:
+                        wtx_count += 1
+                        # S-block WTX request: F2 xx where xx is WTXM (bits 0-5)
+                        wtxm = resp[1] & 0x3F
+                        print(f"  # WTX request #{wtx_count} (WTXM={wtxm}), responding...")
+                        # Send S-block WTX response with same WTXM
+                        wtx_resp = bytes([0xF2, wtxm])
+                        options_wtx = {
+                            'activate_rf_field': 0,  # Keep existing field
+                            'wait_response': 1,
+                            'append_crc': 1,
+                            'auto_select': 0,  # Don't re-select!
+                            'keep_rf_field': 1,
+                            'check_response_crc': 1,
+                        }
+                        resp = self.cmd.hf14a_raw(options=options_wtx, resp_timeout_ms=timeout * 2, data=wtx_resp)
+                    
+                    if resp is None or len(resp) < 1:
+                        continue
+                        
+                    pcb_resp = resp[0]
+                    
+                    # I-block response: 0000 00xx pattern
+                    if (pcb_resp & 0xE2) == 0x02:
+                        data = resp[1:]
+                        if len(data) >= 2:
+                            # Check for valid SW1
+                            if data[-2] in [0x90, 0x61, 0x62, 0x63, 0x64, 0x65, 0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F]:
+                                print(f"  # Response: {data.hex().upper()}")
+                                return data
+                        # Show response even if SW not recognized
+                        if len(data) > 0:
+                            print(f"  # Response: {data.hex().upper()}")
+                            return data
+                    else:
+                        # Not an I-block, show raw for debugging
+                        if not quiet:
+                            print(f"  # Raw response: {resp.hex().upper()}")
                             
                 except Exception as e:
-                    session_active[0] = False
                     if attempt == actual_retries and not quiet:
                         print(f"  # Error: {e}")
             
