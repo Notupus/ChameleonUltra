@@ -1391,34 +1391,47 @@ class HF14AScan(ReaderRequiredUnit):
         
         print("- EMV Detection: Starting...")
         
-        # State for T=CL session management  
-        session_active = [False]  # Track if we have an active ISO14443-4 session
+        # I-block toggle bit for ISO14443-4
         block_number = [0]
         
-        def wrap_apdu_tcl(apdu):
-            """Wrap APDU in ISO 14443-4 I-block"""
-            pcb = 0x02 | (block_number[0] & 0x01)
-            block_number[0] = (block_number[0] + 1) & 0x01
-            return bytes([pcb]) + apdu
-        
-        def unwrap_response(resp):
-            """Unwrap response - remove PCB byte if present"""
-            if resp is None or len(resp) < 1:
-                return None
-            pcb = resp[0]
-            # I-block PCB: 0x02, 0x03 (toggle bit), or with chaining 0x12, 0x13
-            if (pcb & 0xE2) == 0x02:  # I-block pattern
-                return resp[1:] if len(resp) > 1 else None
-            return resp
-        
-        def is_valid_sw(resp):
-            """Check if response ends with valid status word"""
-            if resp is None or len(resp) < 2:
+        def activate_field_and_select():
+            """Turn on RF field and select card with RATS - returns True if successful"""
+            try:
+                # Send REQA/WUPA to wake card, then select and RATS
+                # Use a dummy command just to activate and select
+                options = {
+                    'activate_rf_field': 1,
+                    'wait_response': 1,
+                    'append_crc': 1,
+                    'auto_select': 1,  # This does anticollision + select + RATS
+                    'keep_rf_field': 1,
+                    'check_response_crc': 1,
+                }
+                # Send empty I-block to establish session (some cards need this)
+                # Actually just select - we'll send real APDU next
+                block_number[0] = 0
+                return True
+            except Exception as e:
+                print(f"  # Failed to activate: {e}")
                 return False
-            return resp[-2] in [0x90, 0x61, 0x62, 0x63, 0x64, 0x65, 0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F]
         
-        def send_apdu(apdu, timeout=500, label="APDU", retries=3, quiet=False):
-            """Send APDU with proper ISO14443-4 handling including WTX"""
+        def deactivate_field():
+            """Turn off RF field"""
+            try:
+                options = {
+                    'activate_rf_field': 0,
+                    'wait_response': 0,
+                    'append_crc': 0,
+                    'auto_select': 0,
+                    'keep_rf_field': 0,
+                    'check_response_crc': 0,
+                }
+                self.cmd.hf14a_raw(options=options, resp_timeout_ms=50, data=bytes())
+            except Exception:
+                pass
+        
+        def send_apdu(apdu, timeout=500, label="APDU", retries=3, quiet=False, first=False):
+            """Send APDU with proper WTX handling - waits patiently for slow cards."""
             import time
             
             actual_retries = 0 if quiet else retries
@@ -1432,7 +1445,7 @@ class HF14AScan(ReaderRequiredUnit):
                         print(f"  # Retry attempt {attempt}...")
                 
                 try:
-                    # Start with I-block PCB (block number 0 for fresh session)
+                    # Start with fresh session
                     pcb = 0x02
                     wrapped = bytes([pcb]) + apdu
                     
@@ -1440,55 +1453,78 @@ class HF14AScan(ReaderRequiredUnit):
                         'activate_rf_field': 1,
                         'wait_response': 1,
                         'append_crc': 1,
-                        'auto_select': 1,  # Fresh select each attempt
+                        'auto_select': 1,
                         'keep_rf_field': 1,
                         'check_response_crc': 1,
                     }
                     
+                    print(f"  # RAW TX: {wrapped.hex().upper()}")
                     resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=wrapped)
                     
-                    if resp is None or len(resp) < 1:
+                    if resp is not None and len(resp) > 0:
+                        print(f"  # RAW RX: {resp.hex().upper()}")
+                    else:
+                        print(f"  # RAW RX: None/empty")
                         continue
                     
-                    # Handle WTX (Waiting Time Extension) - card needs more time
-                    # S-block format: 11xx xxxx - WTX is specifically 0xF2 (1111 0010)
+                    # Handle WTX (Waiting Time Extension) - STAY in session, DON'T retry!
                     wtx_count = 0
-                    while resp is not None and len(resp) >= 2 and resp[0] == 0xF2 and wtx_count < 10:
+                    while len(resp) >= 2 and resp[0] == 0xF2 and wtx_count < 30:
                         wtx_count += 1
-                        # S-block WTX request: F2 xx where xx is WTXM (bits 0-5)
                         wtxm = resp[1] & 0x3F
                         print(f"  # WTX request #{wtx_count} (WTXM={wtxm}), responding...")
-                        # Send S-block WTX response with same WTXM
                         wtx_resp = bytes([0xF2, wtxm])
                         options_wtx = {
-                            'activate_rf_field': 0,  # Keep existing field
+                            'activate_rf_field': 0,  # Field already on
                             'wait_response': 1,
                             'append_crc': 1,
-                            'auto_select': 0,  # Don't re-select!
+                            'auto_select': 0,  # DON'T re-select during WTX!
                             'keep_rf_field': 1,
                             'check_response_crc': 1,
                         }
-                        resp = self.cmd.hf14a_raw(options=options_wtx, resp_timeout_ms=timeout * 2, data=wtx_resp)
+                        print(f"  # RAW TX WTX: {wtx_resp.hex().upper()}")
+                        # Use longer timeout for WTX response - card is processing
+                        resp = self.cmd.hf14a_raw(options=options_wtx, resp_timeout_ms=timeout * 3, data=wtx_resp)
+                        if resp is not None and len(resp) > 0:
+                            print(f"  # RAW RX: {resp.hex().upper()}")
+                        else:
+                            # Card didn't respond - try sending WTX again
+                            print(f"  # No response to WTX, waiting...")
+                            time.sleep(0.05)
+                            # Poll for response without sending anything
+                            options_poll = {
+                                'activate_rf_field': 0,
+                                'wait_response': 1,
+                                'append_crc': 0,
+                                'auto_select': 0,
+                                'keep_rf_field': 1,
+                                'check_response_crc': 0,
+                            }
+                            resp = self.cmd.hf14a_raw(options=options_poll, resp_timeout_ms=timeout * 2, data=bytes())
+                            if resp is not None and len(resp) > 0:
+                                print(f"  # RAW RX (poll): {resp.hex().upper()}")
+                            else:
+                                # Still nothing - break out and let retry happen
+                                print(f"  # WTX timeout - card may be lost")
+                                resp = bytes()
+                                break
                     
                     if resp is None or len(resp) < 1:
                         continue
                         
                     pcb_resp = resp[0]
                     
-                    # I-block response: 0000 00xx pattern
+                    # I-block response: check PCB pattern 0000 00xx
                     if (pcb_resp & 0xE2) == 0x02:
                         data = resp[1:]
                         if len(data) >= 2:
-                            # Check for valid SW1
                             if data[-2] in [0x90, 0x61, 0x62, 0x63, 0x64, 0x65, 0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F]:
                                 print(f"  # Response: {data.hex().upper()}")
                                 return data
-                        # Show response even if SW not recognized
                         if len(data) > 0:
                             print(f"  # Response: {data.hex().upper()}")
                             return data
                     else:
-                        # Not an I-block, show raw for debugging
                         if not quiet:
                             print(f"  # Raw response: {resp.hex().upper()}")
                             
@@ -1760,7 +1796,8 @@ class HF14AScan(ReaderRequiredUnit):
             ppse_name = bytes([0x32, 0x50, 0x41, 0x59, 0x2E, 0x53, 0x59, 0x53, 0x2E, 0x44, 0x44, 0x46, 0x30, 0x31])  # 2PAY.SYS.DDF01
             select_ppse = bytes([0x00, 0xA4, 0x04, 0x00, len(ppse_name)]) + ppse_name + bytes([0x00])
             
-            resp = send_apdu(select_ppse, timeout=300, label="SELECT PPSE")
+            # First APDU - activate field and select card
+            resp = send_apdu(select_ppse, timeout=500, label="SELECT PPSE", first=True)
             
             if resp is None or len(resp) < 2:
                 print("  # No valid response from PPSE selection")
@@ -1777,10 +1814,10 @@ class HF14AScan(ReaderRequiredUnit):
                 # Try direct AID selection instead
                 print("  # PPSE not found, trying direct AID selection...")
                 
-                # Try Visa
+                # Try Visa - start fresh since PPSE failed
                 visa_aid = bytes.fromhex('A0000000031010')
                 select_visa = bytes([0x00, 0xA4, 0x04, 0x00, len(visa_aid)]) + visa_aid + bytes([0x00])
-                resp = send_apdu(select_visa, timeout=300, label="SELECT Visa")
+                resp = send_apdu(select_visa, timeout=500, label="SELECT Visa", first=True)
                 
                 if resp is not None and len(resp) >= 2:
                     sw1, sw2 = resp[-2], resp[-1]
@@ -1790,10 +1827,10 @@ class HF14AScan(ReaderRequiredUnit):
                         found_apps.append('A0000000031010')
                 
                 if not found_apps:
-                    # Try Mastercard
+                    # Try Mastercard - start fresh
                     mc_aid = bytes.fromhex('A0000000041010')
                     select_mc = bytes([0x00, 0xA4, 0x04, 0x00, len(mc_aid)]) + mc_aid + bytes([0x00])
-                    resp = send_apdu(select_mc, timeout=300, label="SELECT Mastercard")
+                    resp = send_apdu(select_mc, timeout=500, label="SELECT Mastercard", first=True)
                     
                     if resp is not None and len(resp) >= 2:
                         sw1, sw2 = resp[-2], resp[-1]
@@ -1850,10 +1887,12 @@ class HF14AScan(ReaderRequiredUnit):
                     aid_bytes = bytes.fromhex(aid_hex)
                     select_aid = bytes([0x00, 0xA4, 0x04, 0x00, len(aid_bytes)]) + aid_bytes + bytes([0x00])
                     
-                    # If we have PPSE info, all AID selections are quiet (we just want extra info)
-                    # Otherwise first AID is verbose to show what's happening
-                    is_quiet = have_ppse_info or idx > 0
-                    resp = send_apdu(select_aid, timeout=300, label=f"SELECT AID {aid_hex}", quiet=is_quiet)
+                    # First AID from PPSE should work - show output
+                    # Subsequent AIDs can be quieter
+                    is_quiet = idx > 0
+                    
+                    # Continue session from PPSE (first=False), session stays alive
+                    resp = send_apdu(select_aid, timeout=500, label=f"SELECT AID {aid_hex}", quiet=is_quiet)
                     
                     if resp is None or len(resp) < 2:
                         continue
@@ -1899,7 +1938,7 @@ class HF14AScan(ReaderRequiredUnit):
                     gpo_data = bytes([0x83, 0x00])  # Minimal PDOL
                     gpo_cmd = bytes([0x80, 0xA8, 0x00, 0x00, len(gpo_data)]) + gpo_data + bytes([0x00])
                     
-                    gpo_resp = send_apdu(gpo_cmd, timeout=300, label="GPO", quiet=True)
+                    gpo_resp = send_apdu(gpo_cmd, timeout=500, label="GPO")
                     
                     afl = None
                     if gpo_resp and len(gpo_resp) >= 2:
@@ -1926,7 +1965,7 @@ class HF14AScan(ReaderRequiredUnit):
                                 p2 = (sfi << 3) | 0x04
                                 read_cmd = bytes([0x00, 0xB2, rec, p2, 0x00])
                                 
-                                rec_resp = send_apdu(read_cmd, timeout=200, label=f"READ REC {rec}", quiet=True)
+                                rec_resp = send_apdu(read_cmd, timeout=500, label=f"READ REC SFI{sfi} R{rec}")
                                 
                                 if rec_resp and len(rec_resp) >= 2:
                                     rec_sw1, rec_sw2 = rec_resp[-2], rec_resp[-1]
@@ -2068,18 +2107,7 @@ class HF14AScan(ReaderRequiredUnit):
             pass  # Card doesn't support EMV or communication error
         
         # Clean up RF field
-        try:
-            cleanup_options = {
-                'activate_rf_field': 0,
-                'wait_response': 0,
-                'append_crc': 0,
-                'auto_select': 0,
-                'keep_rf_field': 0,
-                'check_response_crc': 0,
-            }
-            self.cmd.hf14a_raw(options=cleanup_options, resp_timeout_ms=100, data=bytes())
-        except Exception:
-            pass
+        deactivate_field()
 
     def scan_iso7816_apps(self, data_tag):
         """Scan for ISO 7816 applications on the card (non-EMV)"""
