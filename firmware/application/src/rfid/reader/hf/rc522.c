@@ -1497,58 +1497,6 @@ uint8_t pcd_14a_reader_raw_cmd(bool openRFField,  bool waitResp, bool appendCrc,
                      );
         }
 
-        // Handle ISO14443-4 WTX (Waiting Time Extension) S-blocks automatically
-        // WTX S-block format: 0xF2 followed by WTXM byte (bits 5-0 contain multiplier)
-        // We must respond with the same S-block to acknowledge and wait for the actual response
-        if (waitResp && status == STATUS_HF_TAG_OK) {
-            uint8_t wtx_count = 0;
-            uint8_t finalRecvBytes = (*pszDataRecv / 8) + (*pszDataRecv % 8 > 0 ? 1 : 0);
-            
-            // Check if response is a WTX S-block (starts with 0xF2, has CRC, so 4 bytes total or 2 without CRC)
-            while (wtx_count < 30 && finalRecvBytes >= 2 && pDataRecv[0] == 0xF2) {
-                wtx_count++;
-                uint8_t wtxm = pDataRecv[1] & 0x3F;  // Extract WTXM value (bits 5-0)
-                NRF_LOG_INFO("WTX request #%d, WTXM=%d", wtx_count, wtxm);
-                
-                // Send WTX response: echo back the same S-block
-                uint8_t wtx_resp[4] = {0xF2, wtxm, 0x00, 0x00};
-                crc_14a_append(wtx_resp, 2);  // Add CRC
-                
-                // Use a longer timeout for WTX - card is processing
-                uint16_t wtx_timeout = waitRespTimeout * 3;
-                if (wtx_timeout < 1000) wtx_timeout = 1000;  // At least 1 second
-                g_com_timeout_ms = wtx_timeout;
-                
-                // Send WTX response and wait for next response
-                status = pcd_14a_reader_bytes_transfer(
-                             PCD_TRANSCEIVE,
-                             wtx_resp,
-                             4,  // 2 bytes + 2 CRC
-                             pDataRecv,
-                             pszDataRecv,
-                             szDataRecvBitMax
-                         );
-                
-                if (status != STATUS_HF_TAG_OK) {
-                    NRF_LOG_INFO("WTX response failed with status %d", status);
-                    break;
-                }
-                
-                finalRecvBytes = (*pszDataRecv / 8) + (*pszDataRecv % 8 > 0 ? 1 : 0);
-                
-                // If no data received, card may have timed out
-                if (finalRecvBytes == 0) {
-                    NRF_LOG_INFO("No response after WTX");
-                    status = STATUS_HF_ERR_STAT;
-                    break;
-                }
-            }
-            
-            if (wtx_count > 0) {
-                NRF_LOG_INFO("WTX completed after %d extensions", wtx_count);
-            }
-        }
-
         // If we need to receive data, we need to perform further operations on the data based on the remaining configuration after receiving it
         if (waitResp) {
             // Number of bits to bytes
