@@ -504,47 +504,6 @@ bool is_rgb_marquee_enable(void) {
 extern uint8_t tag_emulation_get_slot(void);
 extern uint8_t get_color_by_slot(uint8_t slot);
 
-// PWM color definitions for smooth fading (R, G, B duty values, 0 = full on, 1000 = off)
-typedef struct {
-    uint16_t r;
-    uint16_t g;
-    uint16_t b;
-} rgb_pwm_color_t;
-
-// Extended color palette using PWM mixing
-static const rgb_pwm_color_t pwm_colors[] = {
-    {0, 1000, 1000},     // 0: Red
-    {1000, 0, 1000},     // 1: Green  
-    {1000, 1000, 0},     // 2: Blue
-    {0, 0, 1000},        // 3: Yellow (R+G)
-    {1000, 0, 0},        // 4: Cyan (G+B)
-    {0, 1000, 0},        // 5: Magenta (R+B)
-    {0, 0, 0},           // 6: White (R+G+B)
-    {300, 1000, 1000},   // 7: Orange (more R, less G)
-    {500, 0, 1000},      // 8: Spring Green
-    {1000, 500, 0},      // 9: Azure
-    {500, 1000, 0},      // 10: Violet
-    {0, 500, 1000},      // 11: Rose
-    {1000, 0, 500},      // 12: Teal
-};
-#define NUM_PWM_COLORS 13
-
-// Rainbow color sequence indices (bright vivid colors)
-static const uint8_t rainbow_sequence[] = {0, 7, 3, 8, 1, 12, 4, 9, 2, 10, 5, 11};
-#define RAINBOW_LEN 12
-
-/**
- * @brief Set RGB color with brightness level (0-99)
- */
-static void set_pwm_color_brightness(const rgb_pwm_color_t *color, uint8_t brightness) {
-    uint16_t scale = brightness;
-    // Invert: 0 brightness = all channels off (1000), 99 brightness = original values
-    pwm_sequ_val.channel_0 = 1000 - ((1000 - color->r) * scale / 99);
-    pwm_sequ_val.channel_1 = 1000 - ((1000 - color->g) * scale / 99);
-    pwm_sequ_val.channel_2 = 1000 - ((1000 - color->b) * scale / 99);
-    pwm_sequ_val.channel_3 = 1000;
-}
-
 /**
  * @brief Get the basic color enum from slot color index
  */
@@ -725,105 +684,179 @@ void rgb_set_slot_info(uint8_t slot, uint8_t color) {
 }
 
 /**
- * @brief Non-blocking idle animation with rainbow PWM colors
- * Uses existing slot functions, always keeps slot LED lit
+ * @brief Non-blocking idle animation with smooth PWM rainbow colors
+ * Polls slot actively to keep slot LED always lit and stable
+ * Uses PWM for smooth 256+ color gradients
  */
 bool rgb_idle_cycle_step(void) {
     static uint32_t last_update = 0;
-    static uint8_t anim_pos = 0;
+    static uint16_t hue = 0;          // 0-1535 for smooth rainbow (256 * 6 = 1536 steps)
     static uint8_t pattern = 0;
     static uint16_t cycle_count = 0;
-    static uint8_t color_offset = 0;
+    static uint8_t breath_phase = 0;
     
     uint32_t now = app_timer_cnt_get();
     
-    // 80ms update rate for smooth but visible animation
-    if (app_timer_cnt_diff_compute(now, last_update) < APP_TIMER_TICKS(80)) {
+    // 30ms update rate for very smooth animation
+    if (app_timer_cnt_diff_compute(now, last_update) < APP_TIMER_TICKS(30)) {
         return false;
     }
     last_update = now;
     
     uint32_t *led_pins = hw_get_led_array();
+    
+    // ACTIVELY POLL current slot - this ensures slot is always correct
     uint8_t slot = tag_emulation_get_slot();
     uint8_t slot_color = get_color_by_slot(slot);
     
     cycle_count++;
-    color_offset++;
+    hue = (hue + 4) % 1536;  // Smooth rainbow cycle
+    breath_phase = (breath_phase + 1) % 200;
     
-    // Switch patterns every ~8 seconds
-    if (cycle_count >= 100) {
+    // Switch patterns every ~10 seconds
+    if (cycle_count >= 333) {
         cycle_count = 0;
         pattern = (pattern + 1) % 4;
-        anim_pos = 0;
     }
     
-    // ALWAYS clear all LEDs first
+    // Convert hue (0-1535) to RGB PWM values for smooth rainbow
+    // PWM values are inverted: 0=full bright, 1000=off
+    uint16_t r, g, b;
+    uint16_t sector = hue / 256;
+    uint16_t offset = hue % 256;
+    
+    switch (sector) {
+        case 0:  // Red -> Yellow
+            r = 0;
+            g = 1000 - (offset * 1000 / 255);
+            b = 1000;
+            break;
+        case 1:  // Yellow -> Green
+            r = (offset * 1000 / 255);
+            g = 0;
+            b = 1000;
+            break;
+        case 2:  // Green -> Cyan
+            r = 1000;
+            g = 0;
+            b = 1000 - (offset * 1000 / 255);
+            break;
+        case 3:  // Cyan -> Blue
+            r = 1000;
+            g = (offset * 1000 / 255);
+            b = 0;
+            break;
+        case 4:  // Blue -> Magenta
+            r = 1000 - (offset * 1000 / 255);
+            g = 1000;
+            b = 0;
+            break;
+        default:  // Magenta -> Red
+            r = 0;
+            g = 1000;
+            b = (offset * 1000 / 255);
+            break;
+    }
+    
+    // ALWAYS clear all non-slot LEDs first
     for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
-        nrf_gpio_pin_clear(led_pins[i]);
+        if (i != slot) {
+            nrf_gpio_pin_clear(led_pins[i]);
+        }
     }
     
-    // ALWAYS light slot LED in its assigned color
+    // ALWAYS set slot LED with stable slot color FIRST
     set_slot_light_color(slot_color_to_enum(slot_color));
     nrf_gpio_pin_set(led_pins[slot]);
     
     if (pattern == 0) {
-        // Pattern 1: Rainbow chase bouncing
-        uint8_t head = anim_pos % (RGB_LIST_NUM * 2);
-        bool forward = head < RGB_LIST_NUM;
-        uint8_t pos = forward ? head : (RGB_LIST_NUM * 2 - 1 - head);
-        
-        for (uint8_t t = 0; t < 3; t++) {
-            int8_t led = forward ? (pos - t) : (pos + t);
-            if (led >= 0 && led < RGB_LIST_NUM && led != slot) {
-                uint8_t c = rainbow_sequence[(color_offset + t) % RAINBOW_LEN];
-                set_slot_light_color(c % 7);
-                nrf_gpio_pin_set(led_pins[led]);
+        // Pattern 1: Smooth rainbow flowing across all LEDs
+        for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
+            if (i == slot) continue;
+            
+            // Each LED gets a different hue offset
+            uint16_t led_hue = (hue + (i * 192)) % 1536;  // Spread colors across LEDs
+            uint16_t s = led_hue / 256;
+            uint16_t o = led_hue % 256;
+            uint16_t lr, lg, lb;
+            
+            switch (s) {
+                case 0:  lr = 0; lg = 1000 - (o * 1000 / 255); lb = 1000; break;
+                case 1:  lr = (o * 1000 / 255); lg = 0; lb = 1000; break;
+                case 2:  lr = 1000; lg = 0; lb = 1000 - (o * 1000 / 255); break;
+                case 3:  lr = 1000; lg = (o * 1000 / 255); lb = 0; break;
+                case 4:  lr = 1000 - (o * 1000 / 255); lg = 1000; lb = 0; break;
+                default: lr = 0; lg = 1000; lb = (o * 1000 / 255); break;
             }
+            
+            pwm_sequ_val.channel_0 = lr;
+            pwm_sequ_val.channel_1 = lg;
+            pwm_sequ_val.channel_2 = lb;
+            pwm_sequ_val.channel_3 = 1000;
+            nrf_gpio_pin_set(led_pins[i]);
         }
-        anim_pos++;
         
     } else if (pattern == 1) {
-        // Pattern 2: Dual expanding rings from slot
-        uint8_t ring1 = (color_offset / 2) % 8;
-        uint8_t ring2 = (ring1 + 4) % 8;
+        // Pattern 2: Wave from slot - expanding color rings
+        uint8_t wave_pos = (cycle_count / 3) % 16;
         
         for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
             if (i == slot) continue;
-            uint8_t d = (i > slot) ? (i - slot) : (slot - i);
-            if (d == ring1 || d == ring2) {
-                uint8_t c = rainbow_sequence[(d + color_offset / 3) % RAINBOW_LEN];
-                set_slot_light_color(c % 7);
+            
+            uint8_t dist = (i > slot) ? (i - slot) : (slot - i);
+            int16_t wave_dist = ((int16_t)dist * 3) - wave_pos;
+            
+            if (wave_dist >= 0 && wave_dist < 8) {
+                // Calculate brightness based on wave position
+                uint16_t brightness = (8 - wave_dist) * 125;  // 0-1000
+                
+                pwm_sequ_val.channel_0 = 1000 - (brightness * (1000 - r) / 1000);
+                pwm_sequ_val.channel_1 = 1000 - (brightness * (1000 - g) / 1000);
+                pwm_sequ_val.channel_2 = 1000 - (brightness * (1000 - b) / 1000);
+                pwm_sequ_val.channel_3 = 1000;
                 nrf_gpio_pin_set(led_pins[i]);
             }
         }
         
     } else if (pattern == 2) {
-        // Pattern 3: Full rainbow - all LEDs different colors
+        // Pattern 3: All LEDs smoothly cycle through rainbow together
+        pwm_sequ_val.channel_0 = r;
+        pwm_sequ_val.channel_1 = g;
+        pwm_sequ_val.channel_2 = b;
+        pwm_sequ_val.channel_3 = 1000;
+        
         for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
             if (i == slot) continue;
-            uint8_t c = rainbow_sequence[(i + color_offset / 2) % RAINBOW_LEN];
-            set_slot_light_color(c % 7);
             nrf_gpio_pin_set(led_pins[i]);
         }
         
     } else {
-        // Pattern 4: Breathing - all LEDs same color, pulsing brightness
-        uint8_t breath = (color_offset % 40);
-        uint8_t brightness = breath < 20 ? (breath * 5) : ((40 - breath) * 5);
-        if (brightness < 20) brightness = 20; // Keep minimum visibility
+        // Pattern 4: Smooth breathing with color changes
+        // Sine-like breathing curve using lookup
+        uint8_t bp = breath_phase;
+        uint16_t brightness;
+        if (bp < 100) {
+            brightness = (bp * bp) / 10;  // Ease in: 0 -> 1000
+        } else {
+            bp = 200 - bp;
+            brightness = (bp * bp) / 10;  // Ease out: 1000 -> 0
+        }
+        if (brightness > 1000) brightness = 1000;
+        if (brightness < 50) brightness = 50;  // Keep minimum visibility
         
-        uint8_t c = rainbow_sequence[(color_offset / 40) % RAINBOW_LEN];
-        set_slot_light_color(c % 7);
+        // Apply breathing to current rainbow color
+        pwm_sequ_val.channel_0 = 1000 - (brightness * (1000 - r) / 1000);
+        pwm_sequ_val.channel_1 = 1000 - (brightness * (1000 - g) / 1000);
+        pwm_sequ_val.channel_2 = 1000 - (brightness * (1000 - b) / 1000);
+        pwm_sequ_val.channel_3 = 1000;
         
         for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
             if (i == slot) continue;
-            if (brightness > 50) {
-                nrf_gpio_pin_set(led_pins[i]);
-            }
+            nrf_gpio_pin_set(led_pins[i]);
         }
     }
     
-    // Re-assert slot LED with correct color
+    // RE-ASSERT slot LED to ensure it's always correctly lit
     set_slot_light_color(slot_color_to_enum(slot_color));
     nrf_gpio_pin_set(led_pins[slot]);
     

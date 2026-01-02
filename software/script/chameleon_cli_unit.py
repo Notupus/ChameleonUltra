@@ -1389,6 +1389,8 @@ class HF14AScan(ReaderRequiredUnit):
         if not (int_sak & 0x20):
             return
         
+        print("- EMV Detection: Starting...")
+        
         # ISO 14443-4 T=CL I-block sequence number
         block_number = [0]  # Using list to allow modification in nested function
         
@@ -1416,15 +1418,28 @@ class HF14AScan(ReaderRequiredUnit):
                 # Might be direct response (no T=CL wrapping)
                 return resp
         
-        def send_apdu(apdu, options, timeout=300, use_tcl=True):
-            """Send APDU with optional ISO 14443-4 T=CL wrapping"""
-            if use_tcl:
-                wrapped = wrap_apdu(apdu)
-                resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=wrapped)
-                return unwrap_response(resp)
-            else:
-                resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=apdu)
+        def send_apdu_debug(apdu, options, timeout=300, label="APDU"):
+            """Send APDU and show debug output"""
+            # Try without wrapping first (direct APDU)
+            print(f"  # Sending {label}: {apdu.hex().upper()}")
+            resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=apdu)
+            if resp is not None:
+                print(f"  # Response (direct): {resp.hex().upper()}")
                 return resp
+            
+            # Try with I-block wrapping
+            wrapped = wrap_apdu(apdu)
+            print(f"  # Sending {label} (T=CL): {wrapped.hex().upper()}")
+            resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=wrapped)
+            if resp is not None:
+                print(f"  # Response (T=CL): {resp.hex().upper()}")
+                unwrapped = unwrap_response(resp)
+                if unwrapped is not None:
+                    print(f"  # Unwrapped: {unwrapped.hex().upper()}")
+                return unwrapped
+            
+            print(f"  # No response")
+            return None
         
         # Known payment application AIDs
         payment_aids = {
@@ -1686,7 +1701,6 @@ class HF14AScan(ReaderRequiredUnit):
         
         found_apps = []
         card_info = {}
-        use_tcl = True  # Try with T=CL wrapping first
         
         try:
             # Select PPSE (Proximity Payment System Environment) for contactless
@@ -1694,61 +1708,84 @@ class HF14AScan(ReaderRequiredUnit):
             ppse_name = bytes([0x32, 0x50, 0x41, 0x59, 0x2E, 0x53, 0x59, 0x53, 0x2E, 0x44, 0x44, 0x46, 0x30, 0x31])  # 2PAY.SYS.DDF01
             select_ppse = bytes([0x00, 0xA4, 0x04, 0x00, len(ppse_name)]) + ppse_name + bytes([0x00])
             
-            # Try with T=CL wrapping first
-            resp = send_apdu(select_ppse, options, timeout=300, use_tcl=True)
-            
-            # Debug: show raw response
-            raw_resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=300, data=select_ppse)
-            if raw_resp is not None:
-                print(f"- EMV Debug: Raw PPSE response: {raw_resp.hex().upper() if raw_resp else 'None'}")
+            # Use debug send
+            resp = send_apdu_debug(select_ppse, options, timeout=300, label="SELECT PPSE")
             
             if resp is None or len(resp) < 2:
-                # Try without T=CL wrapping (some cards may not need it)
-                block_number[0] = 0  # Reset block number
-                options['activate_rf_field'] = 1  # Need to re-select
-                options['auto_select'] = 1
-                resp = send_apdu(select_ppse, options, timeout=300, use_tcl=False)
-                if resp is not None and len(resp) >= 2:
-                    use_tcl = False
-            
-            if resp is None or len(resp) < 2:
-                # No response - not a payment card
+                print("  # No valid response from PPSE selection")
                 return
             
             # Check for successful response (SW1 SW2 = 90 00)
             sw1, sw2 = resp[-2], resp[-1]
+            print(f"  # Status Word: {sw1:02X} {sw2:02X}")
+            
             if sw1 != 0x90 or sw2 != 0x00:
-                # PPSE not found - try PSE for contact cards that might respond
-                print(f"- EMV Debug: PPSE SW={sw1:02X}{sw2:02X}")
-                return
-            
-            # Parse PPSE response
-            ppse_data = resp[:-2]
-            tlv = parse_tlv(ppse_data)
-            
-            # Look for Application Templates (tag 61) containing AIDs
-            # The AID is in tag 4F
-            if 0x4F in tlv:
-                aid = tlv[0x4F].hex().upper()
-                found_apps.append(aid)
+                # Try direct AID selection instead
+                print("  # PPSE not found, trying direct AID selection...")
+                options['activate_rf_field'] = 1
+                options['auto_select'] = 1
+                
+                # Try Visa
+                visa_aid = bytes.fromhex('A0000000031010')
+                select_visa = bytes([0x00, 0xA4, 0x04, 0x00, len(visa_aid)]) + visa_aid + bytes([0x00])
+                resp = send_apdu_debug(select_visa, options, timeout=300, label="SELECT Visa")
+                
+                if resp is not None and len(resp) >= 2:
+                    sw1, sw2 = resp[-2], resp[-1]
+                    if sw1 == 0x90 and sw2 == 0x00:
+                        card_info['network'] = 'Visa'
+                        card_info['aid'] = 'A0000000031010'
+                        found_apps.append('A0000000031010')
+                
+                if not found_apps:
+                    # Try Mastercard
+                    options['activate_rf_field'] = 1
+                    mc_aid = bytes.fromhex('A0000000041010')
+                    select_mc = bytes([0x00, 0xA4, 0x04, 0x00, len(mc_aid)]) + mc_aid + bytes([0x00])
+                    resp = send_apdu_debug(select_mc, options, timeout=300, label="SELECT Mastercard")
+                    
+                    if resp is not None and len(resp) >= 2:
+                        sw1, sw2 = resp[-2], resp[-1]
+                        if sw1 == 0x90 and sw2 == 0x00:
+                            card_info['network'] = 'Mastercard'
+                            card_info['aid'] = 'A0000000041010'
+                            found_apps.append('A0000000041010')
+                
+                if not found_apps:
+                    print("  # No payment apps found")
+                    return
+            else:
+                # Parse PPSE response
+                ppse_data = resp[:-2]
+                tlv = parse_tlv(ppse_data)
+                print(f"  # PPSE TLV tags: {[hex(k) for k in tlv.keys()]}")
+                
+                # Look for Application Templates (tag 61) containing AIDs
+                # The AID is in tag 4F
+                if 0x4F in tlv:
+                    aid = tlv[0x4F].hex().upper()
+                    found_apps.append(aid)
+                    print(f"  # Found AID: {aid}")
             
             # If we found AIDs from PPSE, try to select and read each app
             # Also try common AIDs directly too
             aids_to_try = list(set(found_apps + ['A0000000031010', 'A0000000041010', 'A00000002501']))
             
             for aid_hex in aids_to_try:
+                if aid_hex in [c.get('aid') for c in [card_info] if 'aid' in c]:
+                    continue  # Already found this one
                 try:
                     aid_bytes = bytes.fromhex(aid_hex)
                     select_aid = bytes([0x00, 0xA4, 0x04, 0x00, len(aid_bytes)]) + aid_bytes + bytes([0x00])
                     
                     options['activate_rf_field'] = 0  # Already activated
-                    resp = send_apdu(select_aid, options, timeout=300, use_tcl=use_tcl)
+                    resp = send_apdu_debug(select_aid, options, timeout=300, label=f"SELECT AID {aid_hex}")
                     
                     if resp is None or len(resp) < 2:
                         continue
                     
                     sw1, sw2 = resp[-2], resp[-1]
-                    if sw1 != 0x90 or sw2 != 0x00:
+                    if sw1 != 0x90 and sw2 != 0x00:
                         continue
                     
                     # Parse FCI response
@@ -1783,7 +1820,7 @@ class HF14AScan(ReaderRequiredUnit):
                     gpo_data = bytes([0x83, 0x00])  # Minimal PDOL
                     gpo_cmd = bytes([0x80, 0xA8, 0x00, 0x00, len(gpo_data)]) + gpo_data + bytes([0x00])
                     
-                    gpo_resp = send_apdu(gpo_cmd, options, timeout=300, use_tcl=use_tcl)
+                    gpo_resp = send_apdu_debug(gpo_cmd, options, timeout=300, label="GPO")
                     
                     afl = None
                     if gpo_resp and len(gpo_resp) >= 2:
@@ -1810,7 +1847,7 @@ class HF14AScan(ReaderRequiredUnit):
                                 p2 = (sfi << 3) | 0x04
                                 read_cmd = bytes([0x00, 0xB2, rec, p2, 0x00])
                                 
-                                rec_resp = send_apdu(read_cmd, options, timeout=200, use_tcl=use_tcl)
+                                rec_resp = send_apdu_debug(read_cmd, options, timeout=200, label=f"READ REC {rec}")
                                 
                                 if rec_resp and len(rec_resp) >= 2:
                                     rec_sw1, rec_sw2 = rec_resp[-2], rec_resp[-1]
