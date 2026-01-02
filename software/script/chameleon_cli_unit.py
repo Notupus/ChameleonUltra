@@ -1420,6 +1420,9 @@ class HF14AScan(ReaderRequiredUnit):
             """Send APDU to card with retry logic for unreliable connections"""
             import time
             
+            # When in quiet mode, reduce retries - we're just trying for bonus info
+            actual_retries = 1 if quiet else retries
+            
             options = {
                 'activate_rf_field': 1,
                 'wait_response': 1,
@@ -1429,10 +1432,9 @@ class HF14AScan(ReaderRequiredUnit):
                 'check_response_crc': 1,
             }
             
-            if not quiet:
-                print(f"  # Sending {label}: {apdu.hex().upper()}")
+            print(f"  # Sending {label}: {apdu.hex().upper()}")
             
-            for attempt in range(retries + 1):
+            for attempt in range(actual_retries + 1):
                 if attempt > 0:
                     # Small delay between retries to let card settle
                     time.sleep(0.08)
@@ -1444,11 +1446,10 @@ class HF14AScan(ReaderRequiredUnit):
                     try:
                         resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=apdu)
                         if resp is not None and is_valid_sw(resp):
-                            if not quiet:
-                                print(f"  # Response: {resp.hex().upper()}")
+                            print(f"  # Response: {resp.hex().upper()}")
                             return resp
                     except Exception as e:
-                        if attempt == retries and not quiet:
+                        if attempt == actual_retries and not quiet:
                             print(f"  # Error: {e}")
                 elif use_tcl_wrap[0] == True:
                     try:
@@ -1459,31 +1460,28 @@ class HF14AScan(ReaderRequiredUnit):
                         if resp is not None and len(resp) > 0:
                             unwrapped = unwrap_response(resp)
                             if unwrapped and is_valid_sw(unwrapped):
-                                if not quiet:
-                                    print(f"  # Response: {unwrapped.hex().upper()}")
+                                print(f"  # Response: {unwrapped.hex().upper()}")
                                 return unwrapped
                     except Exception as e:
-                        if attempt == retries and not quiet:
+                        if attempt == actual_retries and not quiet:
                             print(f"  # Error: {e}")
                 else:
                     # Try raw APDU first
                     try:
                         resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=apdu)
                         if resp is not None and is_valid_sw(resp):
-                            if not quiet:
-                                print(f"  # Response: {resp.hex().upper()}")
+                            print(f"  # Response: {resp.hex().upper()}")
                             use_tcl_wrap[0] = False
                             return resp
                         # Check if response has PCB prefix
                         if resp is not None:
                             unwrapped = unwrap_response(resp)
                             if unwrapped and is_valid_sw(unwrapped):
-                                if not quiet:
-                                    print(f"  # Response: {unwrapped.hex().upper()}")
+                                print(f"  # Response: {unwrapped.hex().upper()}")
                                 use_tcl_wrap[0] = True
                                 return unwrapped
                     except Exception as e:
-                        if attempt == retries and not quiet:
+                        if attempt == actual_retries and not quiet:
                             print(f"  # Raw APDU error: {e}")
                     
                     # Try with T=CL wrapping - reset block number for fresh start
@@ -1494,12 +1492,11 @@ class HF14AScan(ReaderRequiredUnit):
                         if resp is not None and len(resp) > 0:
                             unwrapped = unwrap_response(resp)
                             if unwrapped and is_valid_sw(unwrapped):
-                                if not quiet:
-                                    print(f"  # Response: {unwrapped.hex().upper()}")
+                                print(f"  # Response: {unwrapped.hex().upper()}")
                                 use_tcl_wrap[0] = True
                                 return unwrapped
                     except Exception as e:
-                        if attempt == retries and not quiet:
+                        if attempt == actual_retries and not quiet:
                             print(f"  # T=CL APDU error: {e}")
             
             return None
@@ -1846,7 +1843,7 @@ class HF14AScan(ReaderRequiredUnit):
                     aids_to_try.append(common_aid)
             
             # If we already have info from PPSE, be quieter about AID selection attempts
-            have_ppse_info = 'network' in card_info or 'app_label' in card_info
+            have_ppse_info = 'network' in card_info and 'app_label' in card_info
             
             aid_selected = False
             for idx, aid_hex in enumerate(aids_to_try):
@@ -1856,8 +1853,9 @@ class HF14AScan(ReaderRequiredUnit):
                     aid_bytes = bytes.fromhex(aid_hex)
                     select_aid = bytes([0x00, 0xA4, 0x04, 0x00, len(aid_bytes)]) + aid_bytes + bytes([0x00])
                     
-                    # First AID (from PPSE) gets verbose output, rest are quiet if we have PPSE info
-                    is_quiet = have_ppse_info and idx > 0
+                    # If we have PPSE info, all AID selections are quiet (we just want extra info)
+                    # Otherwise first AID is verbose to show what's happening
+                    is_quiet = have_ppse_info or idx > 0
                     resp = send_apdu(select_aid, timeout=300, label=f"SELECT AID {aid_hex}", quiet=is_quiet)
                     
                     if resp is None or len(resp) < 2:
