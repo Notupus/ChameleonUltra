@@ -1418,8 +1418,6 @@ class HF14AScan(ReaderRequiredUnit):
         
         def send_apdu(apdu, timeout=300, label="APDU"):
             """Send APDU to card - each call is a fresh session like Android NFC"""
-            # Reset block number for each new APDU exchange
-            block_number[0] = 0
             
             options = {
                 'activate_rf_field': 1,
@@ -1432,7 +1430,7 @@ class HF14AScan(ReaderRequiredUnit):
             
             print(f"  # Sending {label}: {apdu.hex().upper()}")
             
-            # If we already know which mode works, use it
+            # If we already know which mode works, try it first
             if use_tcl_wrap[0] == False:
                 try:
                     resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=apdu)
@@ -1443,6 +1441,8 @@ class HF14AScan(ReaderRequiredUnit):
                     print(f"  # Error: {e}")
             elif use_tcl_wrap[0] == True:
                 try:
+                    # Always reset block number - each APDU is a fresh session with auto_select
+                    block_number[0] = 0
                     wrapped = wrap_apdu_tcl(apdu)
                     resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=wrapped)
                     if resp is not None and len(resp) > 0:
@@ -1470,8 +1470,9 @@ class HF14AScan(ReaderRequiredUnit):
             except Exception as e:
                 print(f"  # Raw APDU error: {e}")
             
-            # Try with T=CL wrapping
+            # Try with T=CL wrapping - reset block number for fresh start
             try:
+                block_number[0] = 0
                 wrapped = wrap_apdu_tcl(apdu)
                 print(f"  # Retry with T=CL wrap: PCB={wrapped[0]:02X}")
                 resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=wrapped)

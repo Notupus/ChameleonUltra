@@ -774,6 +774,11 @@ bool rgb_idle_cycle_step(void) {
             break;
     }
     
+    // Suppress unused variable warnings - RGB values calculated for future use
+    (void)base_r;
+    (void)base_g;
+    (void)base_b;
+    
     // Find up to 4 LEDs closest to slot for PWM heartbeat effect
     // LEDs further from slot get dimmer and different hue offset
     uint8_t pwm_leds[4];
