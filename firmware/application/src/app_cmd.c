@@ -523,7 +523,6 @@ static data_frame_tx_t *cmd_processor_hf14a_emv_read(uint16_t cmd, uint16_t stat
     // Response buffer - structured EMV data
     // Format: [status:1][aid:7][app_label:16][network:1][pan_len:1][pan:10][exp_yy:1][exp_mm:1]
     uint8_t resp[64] = {0};
-    uint16_t resp_len = 0;
     
     // APDU buffers
     uint8_t apdu_buf[64];
@@ -536,7 +535,6 @@ static data_frame_tx_t *cmd_processor_hf14a_emv_read(uint16_t cmd, uint16_t stat
     // Known AIDs
     static const uint8_t AID_MC[] = {0xA0, 0x00, 0x00, 0x00, 0x04, 0x10, 0x10};
     static const uint8_t AID_VISA[] = {0xA0, 0x00, 0x00, 0x00, 0x03, 0x10, 0x10};
-    static const uint8_t PPSE[] = {0x32, 0x50, 0x41, 0x59, 0x2E, 0x53, 0x59, 0x53, 0x2E, 0x44, 0x44, 0x46, 0x30, 0x31};
     
     // Activate RF and select card
     pcd_14a_reader_reset();
@@ -544,7 +542,7 @@ static data_frame_tx_t *cmd_processor_hf14a_emv_read(uint16_t cmd, uint16_t stat
     bsp_delay_ms(10);
     
     picc_14a_tag_t tag;
-    status = pcd_14a_reader_scan_once(&tag);
+    status = pcd_14a_reader_scan_auto(&tag);
     if (status != STATUS_HF_TAG_OK) {
         pcd_14a_reader_antenna_off();
         return data_frame_make(cmd, STATUS_HF_TAG_NO, 0, NULL);
@@ -555,7 +553,7 @@ static data_frame_tx_t *cmd_processor_hf14a_emv_read(uint16_t cmd, uint16_t stat
         apdu_buf[0] = 0x02 | (block_num & 0x01); \
         memcpy(&apdu_buf[1], apdu_data, apdu_len); \
         crc_14a_append(apdu_buf, 1 + apdu_len); \
-        g_com_timeout_ms = timeout_ms; \
+        pcd_14a_reader_timeout_set(timeout_ms); \
         recv_len = 0; \
         status = pcd_14a_reader_bytes_transfer(PCD_TRANSCEIVE, apdu_buf, 1 + apdu_len + 2, recv_buf, &recv_len, sizeof(recv_buf) * 8); \
         if (status == STATUS_HF_TAG_OK && recv_len >= 8) { \
@@ -566,7 +564,7 @@ static data_frame_tx_t *cmd_processor_hf14a_emv_read(uint16_t cmd, uint16_t stat
                 wtx_count++; \
                 uint8_t wtx_resp[4] = {0xF2, recv_buf[1] & 0x3F, 0, 0}; \
                 crc_14a_append(wtx_resp, 2); \
-                g_com_timeout_ms = timeout_ms * 3; \
+                pcd_14a_reader_timeout_set(timeout_ms * 3); \
                 recv_len = 0; \
                 status = pcd_14a_reader_bytes_transfer(PCD_TRANSCEIVE, wtx_resp, 4, recv_buf, &recv_len, sizeof(recv_buf) * 8); \
                 if (status != STATUS_HF_TAG_OK) break; \
