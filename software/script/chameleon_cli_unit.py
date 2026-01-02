@@ -223,6 +223,61 @@ nxp_version_map = {
     (0x34, 0x21, 0x01, 0x01, 0x00, 0x0E, 0x03): "Mikron MIK640D (128 bytes)",
 }
 
+# DESFire / MIFARE Plus / NTAG 4xx version map
+# Format: (vendor, type, subtype, major, minor, size, protocol) -> name
+desfire_version_map = {
+    # DESFire EV1
+    (0x04, 0x01, 0x01, 0x01, 0x00, 0x16, 0x05): "DESFire EV1 2K",
+    (0x04, 0x01, 0x01, 0x01, 0x00, 0x18, 0x05): "DESFire EV1 4K",
+    (0x04, 0x01, 0x01, 0x01, 0x00, 0x1A, 0x05): "DESFire EV1 8K",
+    (0x04, 0x01, 0x01, 0x00, 0x06, 0x16, 0x05): "DESFire EV1 2K",
+    (0x04, 0x01, 0x01, 0x00, 0x06, 0x18, 0x05): "DESFire EV1 4K",
+    (0x04, 0x01, 0x01, 0x00, 0x06, 0x1A, 0x05): "DESFire EV1 8K",
+    # DESFire EV2
+    (0x04, 0x01, 0x01, 0x01, 0x02, 0x16, 0x05): "DESFire EV2 2K",
+    (0x04, 0x01, 0x01, 0x01, 0x02, 0x18, 0x05): "DESFire EV2 4K",
+    (0x04, 0x01, 0x01, 0x01, 0x02, 0x1A, 0x05): "DESFire EV2 8K",
+    (0x04, 0x01, 0x01, 0x12, 0x00, 0x16, 0x05): "DESFire EV2 2K",
+    (0x04, 0x01, 0x01, 0x12, 0x00, 0x18, 0x05): "DESFire EV2 4K",
+    (0x04, 0x01, 0x01, 0x12, 0x00, 0x1A, 0x05): "DESFire EV2 8K",
+    # DESFire EV3
+    (0x04, 0x01, 0x01, 0x01, 0x03, 0x16, 0x05): "DESFire EV3 2K",
+    (0x04, 0x01, 0x01, 0x01, 0x03, 0x18, 0x05): "DESFire EV3 4K",
+    (0x04, 0x01, 0x01, 0x01, 0x03, 0x1A, 0x05): "DESFire EV3 8K",
+    (0x04, 0x01, 0x01, 0x13, 0x00, 0x16, 0x05): "DESFire EV3 2K",
+    (0x04, 0x01, 0x01, 0x13, 0x00, 0x18, 0x05): "DESFire EV3 4K",
+    (0x04, 0x01, 0x01, 0x13, 0x00, 0x1A, 0x05): "DESFire EV3 8K",
+    (0x04, 0x01, 0x01, 0x30, 0x00, 0x16, 0x05): "DESFire EV3 2K",
+    (0x04, 0x01, 0x01, 0x30, 0x00, 0x18, 0x05): "DESFire EV3 4K",
+    (0x04, 0x01, 0x01, 0x30, 0x00, 0x1A, 0x05): "DESFire EV3 8K",
+    # DESFire Light
+    (0x04, 0x08, 0x01, 0x01, 0x00, 0x0A, 0x05): "DESFire Light",
+    (0x04, 0x08, 0x01, 0x00, 0x05, 0x0A, 0x05): "DESFire Light",
+    # MIFARE Plus S
+    (0x04, 0x02, 0x01, 0x01, 0x00, 0x10, 0x05): "MIFARE Plus S 2K",
+    (0x04, 0x02, 0x01, 0x01, 0x00, 0x12, 0x05): "MIFARE Plus S 4K",
+    # MIFARE Plus X
+    (0x04, 0x02, 0x02, 0x01, 0x00, 0x10, 0x05): "MIFARE Plus X 2K",
+    (0x04, 0x02, 0x02, 0x01, 0x00, 0x12, 0x05): "MIFARE Plus X 4K",
+    # MIFARE Plus SE
+    (0x04, 0x02, 0x03, 0x01, 0x00, 0x0E, 0x05): "MIFARE Plus SE 1K",
+    # MIFARE Plus EV1
+    (0x04, 0x02, 0x01, 0x11, 0x00, 0x10, 0x05): "MIFARE Plus EV1 2K",
+    (0x04, 0x02, 0x01, 0x11, 0x00, 0x12, 0x05): "MIFARE Plus EV1 4K",
+    (0x04, 0x02, 0x02, 0x11, 0x00, 0x10, 0x05): "MIFARE Plus EV1 2K",
+    (0x04, 0x02, 0x02, 0x11, 0x00, 0x12, 0x05): "MIFARE Plus EV1 4K",
+    # MIFARE Plus EV2
+    (0x04, 0x02, 0x01, 0x22, 0x00, 0x10, 0x05): "MIFARE Plus EV2 2K",
+    (0x04, 0x02, 0x01, 0x22, 0x00, 0x12, 0x05): "MIFARE Plus EV2 4K",
+    (0x04, 0x02, 0x02, 0x22, 0x00, 0x10, 0x05): "MIFARE Plus EV2 2K",
+    (0x04, 0x02, 0x02, 0x22, 0x00, 0x12, 0x05): "MIFARE Plus EV2 4K",
+    # NTAG 424 DNA
+    (0x04, 0x04, 0x05, 0x04, 0x00, 0x16, 0x05): "NTAG 424 DNA",
+    (0x04, 0x04, 0x05, 0x04, 0x02, 0x16, 0x05): "NTAG 424 DNA TT",
+    # NTAG 413 DNA
+    (0x04, 0x04, 0x05, 0x03, 0x00, 0x0E, 0x05): "NTAG 413 DNA",
+}
+
 default_cwd = Path(__file__).resolve().parent / "bin"
 
 
@@ -1112,6 +1167,912 @@ class HF14AScan(ReaderRequiredUnit):
         except Exception:
             pass  # Tag doesn't support READ_SIG
 
+    def get_desfire_info(self, data_tag):
+        """Get version info for ISO 14443-4 tags (DESFire, MIFARE Plus, NTAG 4xx)"""
+        int_sak = data_tag['sak'][0]
+        ats = data_tag['ats']
+        
+        # Only for ISO 14443-4 tags (SAK bit 0x20 set and has ATS)
+        if not (int_sak & 0x20) or len(ats) == 0:
+            return
+        
+        # Parse ATS to understand tag capabilities
+        if len(ats) >= 2:
+            t0 = ats[1] if len(ats) > 1 else 0
+            historical_bytes_start = 2
+            # Skip TA(1), TB(1), TC(1) if present
+            if t0 & 0x10:  # TA(1) present
+                historical_bytes_start += 1
+            if t0 & 0x20:  # TB(1) present
+                historical_bytes_start += 1
+            if t0 & 0x40:  # TC(1) present
+                historical_bytes_start += 1
+            
+            # Get historical bytes if present
+            hist_len = t0 & 0x0F
+            if hist_len > 0 and historical_bytes_start < len(ats):
+                historical = ats[historical_bytes_start:historical_bytes_start + hist_len]
+                if len(historical) > 0:
+                    # Check for DESFire indicators in historical bytes
+                    # DESFire typically has 0x80 as first historical byte
+                    if historical[0] == 0x80:
+                        print(f"  # Historical bytes indicate DESFire-type tag")
+        
+        options = {
+            'activate_rf_field': 0,
+            'wait_response': 1,
+            'append_crc': 1,
+            'auto_select': 1,
+            'keep_rf_field': 1,
+            'check_response_crc': 1,
+        }
+        
+        try:
+            # For DESFire/ISO 14443-4, GET_VERSION is a native command 0x60
+            # Response comes in 3 parts via ADDITIONAL_FRAME (0xAF)
+            
+            # First part - hardware info
+            resp1 = self.cmd.hf14a_raw(options=options, resp_timeout_ms=200, data=struct.pack('!B', 0x60))
+            if resp1 is None or len(resp1) < 8:
+                return
+            
+            # Check if response indicates more data (0xAF)
+            if resp1[0] != 0xAF:
+                return
+            
+            hw_vendor = resp1[1]
+            hw_type = resp1[2]
+            hw_subtype = resp1[3]
+            hw_major = resp1[4]
+            hw_minor = resp1[5]
+            hw_storage = resp1[6]
+            hw_protocol = resp1[7]
+            
+            # Second part - software info
+            resp2 = self.cmd.hf14a_raw(options=options, resp_timeout_ms=200, data=struct.pack('!B', 0xAF))
+            if resp2 is None or len(resp2) < 8:
+                return
+            
+            if resp2[0] != 0xAF:
+                return
+                
+            sw_vendor = resp2[1]
+            sw_type = resp2[2]
+            sw_subtype = resp2[3]
+            sw_major = resp2[4]
+            sw_minor = resp2[5]
+            sw_storage = resp2[6]
+            sw_protocol = resp2[7]
+            
+            # Third part - UID info  
+            resp3 = self.cmd.hf14a_raw(options=options, resp_timeout_ms=200, data=struct.pack('!B', 0xAF))
+            if resp3 is None or len(resp3) < 14:
+                return
+            
+            if resp3[0] != 0x00:  # Final response should start with 0x00 (success)
+                return
+            
+            # Print version info
+            print(f"- DESFire Version:")
+            print(f"  # HW: Vendor 0x{hw_vendor:02X}, Type 0x{hw_type:02X}, "
+                  f"Subtype 0x{hw_subtype:02X}, Ver {hw_major}.{hw_minor}")
+            print(f"  # SW: Vendor 0x{sw_vendor:02X}, Type 0x{sw_type:02X}, "
+                  f"Subtype 0x{sw_subtype:02X}, Ver {sw_major}.{sw_minor}")
+            
+            # Build version key for lookup
+            version_key = (hw_vendor, hw_type, hw_subtype, hw_major, hw_minor, hw_storage, hw_protocol)
+            
+            if version_key in desfire_version_map:
+                print(f"  # Identified: {desfire_version_map[version_key]}")
+            else:
+                # Try to identify generically
+                storage_sizes = {
+                    0x0E: "1K",
+                    0x10: "2K", 
+                    0x12: "4K",
+                    0x16: "2K",
+                    0x18: "4K",
+                    0x1A: "8K",
+                }
+                storage_str = storage_sizes.get(hw_storage, f"0x{hw_storage:02X}")
+                
+                if hw_type == 0x01:  # DESFire
+                    if hw_major == 0x01:
+                        if hw_minor == 0x00:
+                            ev = "EV1"
+                        elif hw_minor == 0x02:
+                            ev = "EV2"
+                        elif hw_minor == 0x03:
+                            ev = "EV3"
+                        else:
+                            ev = f"v{hw_major}.{hw_minor}"
+                    elif hw_major >= 0x10:
+                        # Newer encoding
+                        if hw_major == 0x12:
+                            ev = "EV2"
+                        elif hw_major == 0x13 or hw_major == 0x30:
+                            ev = "EV3"
+                        else:
+                            ev = f"v{hw_major}.{hw_minor}"
+                    else:
+                        ev = f"v{hw_major}.{hw_minor}"
+                    print(f"  # Identified: DESFire {ev} {storage_str}")
+                elif hw_type == 0x02:  # MIFARE Plus
+                    if hw_subtype == 0x01:
+                        variant = "S"
+                    elif hw_subtype == 0x02:
+                        variant = "X"
+                    elif hw_subtype == 0x03:
+                        variant = "SE"
+                    else:
+                        variant = ""
+                    if hw_major == 0x01:
+                        ev = ""
+                    elif hw_major == 0x11:
+                        ev = " EV1"
+                    elif hw_major == 0x22:
+                        ev = " EV2"
+                    else:
+                        ev = f" v{hw_major}.{hw_minor}"
+                    print(f"  # Identified: MIFARE Plus {variant}{ev} {storage_str}")
+                elif hw_type == 0x04:  # NTAG 4xx
+                    print(f"  # Identified: NTAG 4xx series ({storage_str})")
+                elif hw_type == 0x08:  # DESFire Light
+                    print(f"  # Identified: DESFire Light")
+                else:
+                    print(f"  # Unknown ISO14443-4 tag type 0x{hw_type:02X}")
+                    
+        except Exception as e:
+            pass  # Tag doesn't support DESFire GET_VERSION
+        
+        # Clean up RF field
+        try:
+            options['activate_rf_field'] = 0
+            options['wait_response'] = 0
+            options['keep_rf_field'] = 0
+            self.cmd.hf14a_raw(options=options, resp_timeout_ms=100, data=[])
+        except Exception:
+            pass
+
+    def get_emv_info(self, data_tag):
+        """Detect EMV payment cards and extract card details"""
+        int_sak = data_tag['sak'][0]
+        
+        # EMV cards must support ISO 14443-4 (SAK bit 0x20)
+        if not (int_sak & 0x20):
+            return
+        
+        # Known payment application AIDs
+        payment_aids = {
+            'A0000000031010': ('Visa', 'Visa Credit/Debit'),
+            'A0000000032010': ('Visa', 'Visa Electron'),
+            'A0000000033010': ('Visa', 'Visa Interlink'),
+            'A0000000034010': ('Visa', 'Visa Plus'),
+            'A0000000035010': ('Visa', 'Visa ATM'),
+            'A0000000038010': ('Visa', 'Visa Plus (ATM)'),
+            'A0000000038002': ('Visa', 'Visa Pay'),
+            'A0000000041010': ('Mastercard', 'Mastercard Credit/Debit'),
+            'A0000000042010': ('Mastercard', 'Mastercard (Specific)'),
+            'A0000000043010': ('Mastercard', 'Mastercard US Maestro'),
+            'A0000000043060': ('Mastercard', 'Maestro'),
+            'A0000000044010': ('Mastercard', 'Mastercard Cirrus'),
+            'A0000000045010': ('Mastercard', 'Maestro UK'),
+            'A0000000046000': ('Mastercard', 'Cirrus'),
+            'A0000000048010': ('Mastercard', 'SecureCode (Auth)'),
+            'A0000000049999': ('Mastercard', 'Mastercard Test'),
+            'A00000002501': ('American Express', 'Amex'),
+            'A000000025010402': ('American Express', 'Amex US Credit'),
+            'A000000025010701': ('American Express', 'Amex ExpressPay'),
+            'A000000025010801': ('American Express', 'Amex US Debit'),
+            'A0000001523010': ('Discover', 'Discover'),
+            'A0000001524010': ('Discover', 'Discover US Common Debit'),
+            'A0000000651010': ('JCB', 'JCB'),
+            'A000000333010101': ('UnionPay', 'UnionPay Debit'),
+            'A000000333010102': ('UnionPay', 'UnionPay Credit'),
+            'A000000333010103': ('UnionPay', 'UnionPay Quasi-Credit'),
+            'A000000004306001': ('Maestro', 'Maestro'),
+            'A0000000042203': ('Mastercard', 'Mastercard US Debit (MDES)'),
+            'A000000152': ('Discover', 'Discover ZIP'),
+            'A0000002771010': ('Interac', 'Interac'),
+            'A00000000410101213': ('Mastercard', 'Mastercard PayPass'),
+            'A00000000410101215': ('Mastercard', 'Mastercard PayPass MAG'),
+            'A000000677010': ('Rupay', 'Rupay'),
+            'A0000006581010': ('MIR', 'MIR Credit'),
+            'A0000006582010': ('MIR', 'MIR Debit'),
+            'D5780000021010': ('Bankaxept', 'Bankaxept (Norway)'),
+            'A00000006510': ('JCB', 'JCB J/Speedy'),
+            'D27600002545500100': ('girocard', 'girocard'),
+            'A0000000043060': ('Maestro', 'Maestro'),
+            'A0000000050001': ('PBOC', 'PBOC Debit'),
+            'A0000000050002': ('PBOC', 'PBOC Credit'),
+            'A000000620': ('DNA', 'DNA Payment (Saudi)'),
+            'A000000384': ('eTax', 'eTax'),
+            'A0000003591010': ('Euro Alliance', 'EuroAlliance of Payment Schemes'),
+        }
+        
+        # Bank Identification Number (BIN) ranges for major issuers
+        # First 6 digits of card number identify the issuer
+        bank_bins = {
+            # US Banks
+            '4': 'Visa',
+            '51': 'Mastercard', '52': 'Mastercard', '53': 'Mastercard', '54': 'Mastercard', '55': 'Mastercard',
+            '2221': 'Mastercard', '2720': 'Mastercard',  # New MC range
+            '34': 'American Express', '37': 'American Express',
+            '6011': 'Discover', '644': 'Discover', '645': 'Discover', '65': 'Discover',
+            '35': 'JCB',
+            '62': 'UnionPay',
+            '5019': 'Dankort',
+            '4571': 'Dankort',
+            # Common bank BINs (first 6 digits)
+            '411111': 'Test Card (Visa)',
+            '555555': 'Test Card (Mastercard)',
+            '378282': 'Test Card (Amex)',
+            '601100': 'Test Card (Discover)',
+        }
+        
+        # TLV tag meanings for EMV
+        emv_tags = {
+            0x4F: 'AID',
+            0x50: 'Application Label',
+            0x57: 'Track 2 Equivalent',
+            0x5A: 'PAN (Card Number)',
+            0x5F20: 'Cardholder Name',
+            0x5F24: 'Expiration Date',
+            0x5F25: 'Effective Date',
+            0x5F28: 'Issuer Country Code',
+            0x5F2A: 'Transaction Currency Code',
+            0x5F2D: 'Language Preference',
+            0x5F34: 'PAN Sequence Number',
+            0x5F53: 'IBAN',
+            0x5F54: 'Bank Identifier Code',
+            0x61: 'Application Template',
+            0x6F: 'FCI Template',
+            0x70: 'EMV Record Template',
+            0x77: 'Response Template 2',
+            0x80: 'Response Template 1',
+            0x82: 'AIP',
+            0x84: 'DF Name',
+            0x87: 'Application Priority',
+            0x88: 'SFI',
+            0x8C: 'CDOL1',
+            0x8D: 'CDOL2',
+            0x8E: 'CVM List',
+            0x8F: 'CA Public Key Index',
+            0x90: 'Issuer PK Certificate',
+            0x92: 'Issuer PK Remainder',
+            0x93: 'Signed Static App Data',
+            0x94: 'AFL',
+            0x95: 'TVR',
+            0x9A: 'Transaction Date',
+            0x9C: 'Transaction Type',
+            0x9F02: 'Amount Authorized',
+            0x9F03: 'Amount Other',
+            0x9F06: 'AID (full)',
+            0x9F07: 'AUC',
+            0x9F08: 'App Version',
+            0x9F09: 'App Version',
+            0x9F0D: 'IAC Default',
+            0x9F0E: 'IAC Denial',
+            0x9F0F: 'IAC Online',
+            0x9F10: 'IAD',
+            0x9F11: 'Issuer Code Table Index',
+            0x9F12: 'Application Preferred Name',
+            0x9F13: 'Last Online ATC',
+            0x9F14: 'LCOL',
+            0x9F17: 'PIN Try Counter',
+            0x9F1A: 'Terminal Country Code',
+            0x9F1F: 'Track 1 Discretionary',
+            0x9F20: 'Track 2 Discretionary',
+            0x9F21: 'Transaction Time',
+            0x9F26: 'Application Cryptogram',
+            0x9F27: 'CID',
+            0x9F32: 'Issuer PK Exponent',
+            0x9F33: 'Terminal Capabilities',
+            0x9F34: 'CVM Results',
+            0x9F35: 'Terminal Type',
+            0x9F36: 'ATC',
+            0x9F37: 'Unpredictable Number',
+            0x9F38: 'PDOL',
+            0x9F42: 'App Currency Code',
+            0x9F44: 'App Currency Exponent',
+            0x9F45: 'Data Auth Code',
+            0x9F46: 'ICC PK Certificate',
+            0x9F47: 'ICC PK Exponent',
+            0x9F48: 'ICC PK Remainder',
+            0x9F49: 'DDOL',
+            0x9F4A: 'SDA Tag List',
+            0x9F4B: 'Signed Dynamic App Data',
+            0x9F4C: 'ICC Dynamic Number',
+            0x9F4D: 'Log Entry',
+            0x9F4F: 'Log Format',
+            0x9F51: 'App Currency Code',
+            0x9F52: 'Card Verification',
+            0x9F53: 'Consecutive Trans Limit Intl',
+            0x9F54: 'Cumulative Total Trans Upper',
+            0x9F55: 'Geographic Indicator',
+            0x9F56: 'Issuer Authentication Indicator',
+            0x9F57: 'Issuer Country Code',
+            0x9F58: 'Lower Consec Offline Limit',
+            0x9F59: 'Upper Consec Offline Limit',
+            0x9F5A: 'Issuer URL2',
+            0x9F5C: 'Upper Cumul Offline Trans',
+            0x9F72: 'Consecutive Trans Limit',
+            0x9F73: 'Currency Conv Factor',
+            0x9F74: 'VLP Issuer Auth Code',
+            0x9F75: 'Cumulative Total Trans Lower',
+            0x9F76: 'Secondary App Currency Code',
+            0x9F77: 'VLP Funds Limit',
+            0x9F78: 'VLP Single Trans Limit',
+            0x9F79: 'VLP Available Funds',
+            0x9F7C: 'Merchant Custom Data',
+            0x9F7D: 'Unknown DS ID',
+            0xA5: 'FCI Proprietary Template',
+            0xBF0C: 'FCI Issuer Discretionary Data',
+        }
+        
+        def parse_tlv(data, depth=0):
+            """Parse TLV data and return dictionary of tags and values"""
+            result = {}
+            i = 0
+            while i < len(data):
+                if i >= len(data):
+                    break
+                    
+                # Parse tag
+                tag = data[i]
+                i += 1
+                
+                # Check for multi-byte tag
+                if (tag & 0x1F) == 0x1F:
+                    if i >= len(data):
+                        break
+                    tag = (tag << 8) | data[i]
+                    i += 1
+                    # Could be even more bytes
+                    while i < len(data) and (data[i-1] & 0x80):
+                        tag = (tag << 8) | data[i]
+                        i += 1
+                
+                if i >= len(data):
+                    break
+                    
+                # Parse length
+                length = data[i]
+                i += 1
+                
+                if length & 0x80:
+                    num_len_bytes = length & 0x7F
+                    if i + num_len_bytes > len(data):
+                        break
+                    length = 0
+                    for _ in range(num_len_bytes):
+                        length = (length << 8) | data[i]
+                        i += 1
+                
+                if i + length > len(data):
+                    break
+                    
+                value = data[i:i+length]
+                i += length
+                
+                result[tag] = value
+                
+                # Recursively parse constructed tags
+                if tag in [0x61, 0x6F, 0x70, 0x77, 0xA5, 0xBF0C]:
+                    try:
+                        nested = parse_tlv(value, depth+1)
+                        result.update(nested)
+                    except Exception:
+                        pass
+                        
+            return result
+        
+
+        
+        def format_expiry(exp_bytes):
+            """Format expiration date from YYMMDD"""
+            if len(exp_bytes) >= 2:
+                yy = exp_bytes[0]
+                mm = exp_bytes[1]
+                # Handle BCD encoding
+                if yy > 0x20 and yy < 0x99:
+                    yy = ((yy >> 4) * 10) + (yy & 0x0F)
+                    mm = ((mm >> 4) * 10) + (mm & 0x0F)
+                return f"{mm:02d}/20{yy:02d}"
+            return "Unknown"
+        
+        def get_bank_from_bin(pan):
+            """Look up issuing bank from BIN (first 6-8 digits)"""
+            # Check longest prefixes first
+            for prefix_len in [8, 6, 4, 2, 1]:
+                if len(pan) >= prefix_len:
+                    prefix = pan[:prefix_len]
+                    if prefix in bank_bins:
+                        return bank_bins[prefix]
+            return None
+        
+        options = {
+            'activate_rf_field': 1,
+            'wait_response': 1,
+            'append_crc': 1,
+            'auto_select': 1,
+            'keep_rf_field': 1,
+            'check_response_crc': 1,
+        }
+        
+        found_apps = []
+        card_info = {}
+        
+        try:
+            # Select PPSE (Proximity Payment System Environment) for contactless
+            # APDU: 00 A4 04 00 0E 325041592E5359532E4444463031 00
+            ppse_name = bytes([0x32, 0x50, 0x41, 0x59, 0x2E, 0x53, 0x59, 0x53, 0x2E, 0x44, 0x44, 0x46, 0x30, 0x31])  # 2PAY.SYS.DDF01
+            select_ppse = bytes([0x00, 0xA4, 0x04, 0x00, len(ppse_name)]) + ppse_name + bytes([0x00])
+            
+            resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=300, data=select_ppse)
+            
+            if resp is None or len(resp) < 2:
+                return
+            
+            # Check for successful response (SW1 SW2 = 90 00)
+            sw1, sw2 = resp[-2], resp[-1]
+            if sw1 != 0x90 or sw2 != 0x00:
+                return
+            
+            # Parse PPSE response
+            ppse_data = resp[:-2]
+            tlv = parse_tlv(ppse_data)
+            
+            # Look for Application Templates (tag 61) containing AIDs
+            # The AID is in tag 4F
+            if 0x4F in tlv:
+                aid = tlv[0x4F].hex().upper()
+                found_apps.append(aid)
+            
+            # If we found AIDs from PPSE, try to select and read each app
+            # Also try common AIDs directly
+            aids_to_try = list(set(found_apps + ['A0000000031010', 'A0000000041010', 'A00000002501']))
+            
+            for aid_hex in aids_to_try:
+                try:
+                    aid_bytes = bytes.fromhex(aid_hex)
+                    select_aid = bytes([0x00, 0xA4, 0x04, 0x00, len(aid_bytes)]) + aid_bytes + bytes([0x00])
+                    
+                    options['activate_rf_field'] = 0  # Already activated
+                    resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=300, data=select_aid)
+                    
+                    if resp is None or len(resp) < 2:
+                        continue
+                    
+                    sw1, sw2 = resp[-2], resp[-1]
+                    if sw1 != 0x90 or sw2 != 0x00:
+                        continue
+                    
+                    # Parse FCI response
+                    fci_data = resp[:-2]
+                    fci_tlv = parse_tlv(fci_data)
+                    
+                    # Get application info
+                    if aid_hex in payment_aids:
+                        card_info['network'], card_info['app_type'] = payment_aids[aid_hex]
+                    else:
+                        card_info['network'] = 'Unknown Network'
+                        card_info['app_type'] = 'Payment App'
+                    
+                    card_info['aid'] = aid_hex
+                    
+                    # Get application label
+                    if 0x50 in fci_tlv:
+                        try:
+                            card_info['app_label'] = fci_tlv[0x50].decode('ascii', errors='ignore').strip()
+                        except Exception:
+                            pass
+                    
+                    # Get preferred name
+                    if 0x9F12 in fci_tlv:
+                        try:
+                            card_info['preferred_name'] = fci_tlv[0x9F12].decode('ascii', errors='ignore').strip()
+                        except Exception:
+                            pass
+                    
+                    # Try to get processing options to find AFL
+                    # GPO command: 80 A8 00 00 02 83 00 00
+                    gpo_data = bytes([0x83, 0x00])  # Minimal PDOL
+                    gpo_cmd = bytes([0x80, 0xA8, 0x00, 0x00, len(gpo_data)]) + gpo_data + bytes([0x00])
+                    
+                    gpo_resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=300, data=gpo_cmd)
+                    
+                    afl = None
+                    if gpo_resp and len(gpo_resp) >= 2:
+                        gpo_sw1, gpo_sw2 = gpo_resp[-2], gpo_resp[-1]
+                        if gpo_sw1 == 0x90 and gpo_sw2 == 0x00:
+                            gpo_tlv = parse_tlv(gpo_resp[:-2])
+                            if 0x94 in gpo_tlv:
+                                afl = gpo_tlv[0x94]
+                            elif 0x80 in gpo_tlv and len(gpo_tlv[0x80]) > 2:
+                                # Format 1 response: AIP (2 bytes) + AFL
+                                afl = gpo_tlv[0x80][2:]
+                    
+                    # Read records using AFL
+                    if afl and len(afl) >= 4:
+                        for i in range(0, len(afl), 4):
+                            if i + 3 >= len(afl):
+                                break
+                            sfi = (afl[i] >> 3) & 0x1F
+                            first_rec = afl[i + 1]
+                            last_rec = afl[i + 2]
+                            
+                            for rec in range(first_rec, min(last_rec + 1, first_rec + 5)):  # Limit reads
+                                # READ RECORD: 00 B2 [record] [SFI << 3 | 0x04] 00
+                                p2 = (sfi << 3) | 0x04
+                                read_cmd = bytes([0x00, 0xB2, rec, p2, 0x00])
+                                
+                                rec_resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=200, data=read_cmd)
+                                
+                                if rec_resp and len(rec_resp) >= 2:
+                                    rec_sw1, rec_sw2 = rec_resp[-2], rec_resp[-1]
+                                    if rec_sw1 == 0x90 and rec_sw2 == 0x00:
+                                        rec_tlv = parse_tlv(rec_resp[:-2])
+                                        
+                                        # Extract PAN (tag 5A)
+                                        if 0x5A in rec_tlv and 'pan' not in card_info:
+                                            pan_bytes = rec_tlv[0x5A]
+                                            pan = pan_bytes.hex().upper().rstrip('F')
+                                            card_info['pan'] = pan
+                                            card_info['pan_masked'] = pan
+                                        
+                                        # Extract Track 2 (tag 57) - has PAN and expiry
+                                        if 0x57 in rec_tlv:
+                                            t2 = rec_tlv[0x57].hex().upper()
+                                            # Track 2 format: PAN D YYMM ... (D is separator)
+                                            if 'D' in t2:
+                                                parts = t2.split('D')
+                                                if len(parts) >= 2:
+                                                    if 'pan' not in card_info:
+                                                        card_info['pan'] = parts[0].rstrip('F')
+                                                        card_info['pan_masked'] = mask_pan(parts[0].rstrip('F'))
+                                                    if 'expiry' not in card_info and len(parts[1]) >= 4:
+                                                        yy = int(parts[1][0:2], 16)
+                                                        mm = int(parts[1][2:4], 16)
+                                                        card_info['expiry'] = f"{mm:02d}/20{yy:02d}"
+                                        
+                                        # Extract cardholder name (tag 5F20)
+                                        if 0x5F20 in rec_tlv and 'name' not in card_info:
+                                            try:
+                                                name = rec_tlv[0x5F20].decode('ascii', errors='ignore').strip()
+                                                # Clean up name (often has trailing spaces or /)
+                                                name = name.replace('/', ' ').strip()
+                                                if name and len(name) > 1:
+                                                    card_info['name'] = name
+                                            except Exception:
+                                                pass
+                                        
+                                        # Extract expiration (tag 5F24)
+                                        if 0x5F24 in rec_tlv and 'expiry' not in card_info:
+                                            exp = rec_tlv[0x5F24]
+                                            if len(exp) >= 2:
+                                                # BCD encoded YYMMDD
+                                                yy = ((exp[0] >> 4) * 10) + (exp[0] & 0x0F)
+                                                mm = ((exp[1] >> 4) * 10) + (exp[1] & 0x0F)
+                                                card_info['expiry'] = f"{mm:02d}/20{yy:02d}"
+                                        
+                                        # Extract effective date (tag 5F25)
+                                        if 0x5F25 in rec_tlv and 'effective' not in card_info:
+                                            eff = rec_tlv[0x5F25]
+                                            if len(eff) >= 2:
+                                                yy = ((eff[0] >> 4) * 10) + (eff[0] & 0x0F)
+                                                mm = ((eff[1] >> 4) * 10) + (eff[1] & 0x0F)
+                                                card_info['effective'] = f"{mm:02d}/20{yy:02d}"
+                                        
+                                        # Extract issuer country (tag 5F28)
+                                        if 0x5F28 in rec_tlv and 'country' not in card_info:
+                                            country_code = rec_tlv[0x5F28].hex()
+                                            country_codes = {
+                                                '0840': 'USA', '0826': 'UK', '0276': 'Germany', '0250': 'France',
+                                                '0124': 'Canada', '0392': 'Japan', '0036': 'Australia', '0156': 'China',
+                                                '0356': 'India', '0076': 'Brazil', '0484': 'Mexico', '0528': 'Netherlands',
+                                                '0752': 'Sweden', '0578': 'Norway', '0208': 'Denmark', '0756': 'Switzerland',
+                                                '0040': 'Austria', '0056': 'Belgium', '0380': 'Italy', '0724': 'Spain',
+                                                '0620': 'Portugal', '0616': 'Poland', '0203': 'Czech Republic',
+                                                '0643': 'Russia', '0792': 'Turkey', '0702': 'Singapore', '0344': 'Hong Kong',
+                                                '0410': 'South Korea', '0158': 'Taiwan', '0682': 'Saudi Arabia',
+                                                '0784': 'UAE', '0376': 'Israel', '0710': 'South Africa',
+                                            }
+                                            card_info['country'] = country_codes.get(country_code, f'Code {country_code}')
+                                        
+                                        # Language preference (tag 5F2D)
+                                        if 0x5F2D in rec_tlv and 'language' not in card_info:
+                                            try:
+                                                card_info['language'] = rec_tlv[0x5F2D].decode('ascii', errors='ignore')[:2].upper()
+                                            except Exception:
+                                                pass
+                                        
+                                        # Application version (tag 9F08 or 9F09)
+                                        for ver_tag in [0x9F08, 0x9F09]:
+                                            if ver_tag in rec_tlv and 'app_version' not in card_info:
+                                                ver = rec_tlv[ver_tag]
+                                                if len(ver) >= 2:
+                                                    card_info['app_version'] = f"{ver[0]}.{ver[1]}"
+                    
+                    # If we found useful info, break
+                    if 'pan' in card_info or 'network' in card_info:
+                        break
+                        
+                except Exception:
+                    continue
+            
+            # Print EMV info if we found anything
+            if card_info:
+                print(f"- EMV Payment Card:")
+                
+                if 'network' in card_info:
+                    network_info = card_info['network']
+                    if 'app_type' in card_info:
+                        network_info += f" ({card_info['app_type']})"
+                    print(f"  # Network: {network_info}")
+                
+                if 'aid' in card_info:
+                    print(f"  # AID: {card_info['aid']}")
+                
+                if 'app_label' in card_info:
+                    print(f"  # Application: {card_info['app_label']}")
+                elif 'preferred_name' in card_info:
+                    print(f"  # Application: {card_info['preferred_name']}")
+                
+                if 'pan_masked' in card_info:
+                    print(f"  # Card Number: {card_info['pan_masked']}")
+                    # Try to identify bank from BIN
+                    if 'pan' in card_info:
+                        bank = get_bank_from_bin(card_info['pan'])
+                        if bank:
+                            print(f"  # Card Brand: {bank}")
+                
+                if 'name' in card_info:
+                    # Partially mask the name for privacy
+                    name = card_info['name']
+                    if len(name) > 4:
+                        masked_name = name[:2] + '*' * (len(name) - 4) + name[-2:]
+                    else:
+                        masked_name = '*' * len(name)
+                    print(f"  # Cardholder: {masked_name}")
+                
+                if 'expiry' in card_info:
+                    print(f"  # Expires: {card_info['expiry']}")
+                
+                if 'effective' in card_info:
+                    print(f"  # Effective: {card_info['effective']}")
+                
+                if 'country' in card_info:
+                    print(f"  # Issuing Country: {card_info['country']}")
+                
+                if 'language' in card_info:
+                    print(f"  # Language: {card_info['language']}")
+                
+                if 'app_version' in card_info:
+                    print(f"  # App Version: {card_info['app_version']}")
+                
+        except Exception as e:
+            pass  # Card doesn't support EMV or communication error
+        
+        # Clean up RF field
+        try:
+            options['activate_rf_field'] = 0
+            options['wait_response'] = 0
+            options['keep_rf_field'] = 0
+            self.cmd.hf14a_raw(options=options, resp_timeout_ms=100, data=[])
+        except Exception:
+            pass
+
+    def get_mifare_classic_info(self, data_tag):
+        """Detect MIFARE Classic variants and magic card types"""
+        int_sak = data_tag['sak'][0]
+        uid = data_tag['uid']
+        atqa = data_tag['atqa']
+        
+        # Only process MIFARE Classic compatible SAKs
+        classic_saks = {
+            0x01: ("MIFARE Classic 1K", 1024),     # Rare older variant
+            0x08: ("MIFARE Classic 1K", 1024),
+            0x09: ("MIFARE Mini", 320),
+            0x10: ("MIFARE Plus 2K (SL1)", 2048),  # Plus in SL1 (Classic compatible)
+            0x11: ("MIFARE Plus 4K (SL1)", 4096),
+            0x18: ("MIFARE Classic 4K", 4096),
+            0x19: ("MIFARE Classic 2K", 2048),     # Rare variant
+            0x28: ("SmartMX + MIFARE Classic 1K", 1024),
+            0x38: ("SmartMX + MIFARE Classic 4K", 4096),
+            0x88: ("MIFARE Classic 1K (Infineon)", 1024),
+            0x98: ("MIFARE Pro (Dual)", 1024),
+        }
+        
+        if int_sak not in classic_saks:
+            return
+        
+        base_type, storage = classic_saks[int_sak]
+        
+        print(f"- MIFARE Classic Info:")
+        
+        # Determine UID size type
+        uid_len = len(uid)
+        if uid_len == 4:
+            uid_type = "Single Size (4 byte)"
+        elif uid_len == 7:
+            uid_type = "Double Size (7 byte)"
+        elif uid_len == 10:
+            uid_type = "Triple Size (10 byte)"
+        else:
+            uid_type = f"Unknown ({uid_len} byte)"
+        print(f"  # UID Type: {uid_type}")
+        
+        # Analyze ATQA for more info
+        atqa_val = (atqa[1] << 8) | atqa[0] if len(atqa) >= 2 else 0
+        
+        # Check UID manufacturer
+        is_nxp = uid[0] == 0x04
+        
+        # Common Chinese clone identifiers
+        # Many clones use specific UID prefixes or have unusual ATQA patterns
+        clone_indicators = []
+        
+        # Check for common clone UID prefixes (non-NXP)
+        if not is_nxp:
+            # Check known clone manufacturer bytes
+            clone_mfr = {
+                0x00: "Likely clone (null manufacturer)",
+                0x08: "Fujitsu (often used by clones)",
+                0x02: "STMicroelectronics",
+                0x05: "Infineon",
+            }
+            if uid[0] in clone_mfr and uid[0] != 0x04:
+                clone_indicators.append(clone_mfr.get(uid[0], f"Non-NXP (0x{uid[0]:02X})"))
+        
+        # Detect magic card capabilities
+        options = {
+            'activate_rf_field': 0,
+            'wait_response': 1,
+            'append_crc': 0,
+            'auto_select': 0,
+            'keep_rf_field': 1,
+            'check_response_crc': 0,
+        }
+        
+        magic_type = None
+        
+        try:
+            # Test for Gen1a (Chinese magic card with backdoor commands)
+            # Gen1a responds to HALT + 50 00 (unauthorized WUPA after HALT)
+            # or responds to raw 40 (backdoor command)
+            
+            # First, select the card normally
+            options_select = {
+                'activate_rf_field': 1,
+                'wait_response': 1,
+                'append_crc': 1,
+                'auto_select': 1,
+                'keep_rf_field': 1,
+                'check_response_crc': 0,
+            }
+            self.cmd.hf14a_raw(options=options_select, resp_timeout_ms=100, data=[])
+            
+            # Try Gen1a backdoor command (7-bit 0x40)
+            options_gen1a = {
+                'activate_rf_field': 0,
+                'wait_response': 1,
+                'append_crc': 0,
+                'auto_select': 0,
+                'keep_rf_field': 1,
+                'check_response_crc': 0,
+                'bits_in_last_byte': 7,  # 7-bit command
+            }
+            
+            try:
+                resp = self.cmd.hf14a_raw(options=options_gen1a, resp_timeout_ms=50, data=bytes([0x40]))
+                if resp is not None and len(resp) > 0:
+                    # Got response to 0x40, likely Gen1a
+                    # Try 0x43 to confirm
+                    resp2 = self.cmd.hf14a_raw(options=options_gen1a, resp_timeout_ms=50, data=bytes([0x43]))
+                    if resp2 is not None and len(resp2) > 0:
+                        magic_type = "Gen1a (Chinese Magic)"
+                        clone_indicators.append("Backdoor commands supported")
+            except Exception:
+                pass
+            
+            # Test for Gen2/CUID (direct write to block 0)
+            # Gen2 cards allow writing to block 0 with standard write command after auth
+            # We can't fully test without a key, but we can note the possibility
+            if magic_type is None:
+                # Check for unusual ATQA patterns common in Gen2
+                # Many Gen2 cards have ATQA that doesn't match standard
+                if atqa_val == 0x0004 and int_sak == 0x08:
+                    # Standard 1K pattern - could be genuine or Gen2
+                    pass
+                elif atqa_val == 0x0002 and int_sak == 0x18:
+                    # Standard 4K pattern
+                    pass
+                elif atqa_val == 0x0044 or atqa_val == 0x0042:
+                    # Often seen in Gen2/CUID cards
+                    clone_indicators.append("Non-standard ATQA (possible Gen2/CUID)")
+                    
+            # Test for Gen4/GTU (Ultimate Magic Card)
+            # Gen4 responds to special password-protected commands
+            # Default password is usually 00000000
+            if magic_type is None:
+                try:
+                    # Gen4 GTU command: CF 00 00 00 00 CE (with default password)
+                    options_gen4 = {
+                        'activate_rf_field': 1,
+                        'wait_response': 1,
+                        'append_crc': 0,
+                        'auto_select': 1,
+                        'keep_rf_field': 1,
+                        'check_response_crc': 0,
+                    }
+                    # GTU config read command
+                    gen4_cmd = bytes([0xCF, 0x00, 0x00, 0x00, 0x00, 0xCE])
+                    resp = self.cmd.hf14a_raw(options=options_gen4, resp_timeout_ms=50, data=gen4_cmd)
+                    if resp is not None and len(resp) >= 4:
+                        magic_type = "Gen4 GTU (Ultimate Magic)"
+                        clone_indicators.append("GTU commands supported")
+                except Exception:
+                    pass
+                    
+        except Exception:
+            pass
+        
+        # Determine likely card type
+        if magic_type:
+            print(f"  # Magic Type: {magic_type}")
+        
+        # Check for genuine vs clone based on available evidence
+        if is_nxp and not magic_type:
+            card_origin = "Likely genuine NXP"
+        elif is_nxp and magic_type:
+            card_origin = f"Clone with NXP UID prefix ({magic_type})"
+        elif magic_type:
+            card_origin = f"Chinese clone ({magic_type})"
+        elif clone_indicators:
+            card_origin = "Possible clone"
+        else:
+            card_origin = "Unknown origin"
+        
+        print(f"  # Origin: {card_origin}")
+        
+        # Additional details from ATQA
+        # Bits 6-7 of byte 0 indicate UID size
+        uid_size_bits = (atqa[0] >> 6) & 0x03 if len(atqa) >= 1 else 0
+        # Bits 0-4 of byte 0 are proprietary
+        # Byte 1 bits 0-4 indicate anticollision
+        
+        if clone_indicators and not magic_type:
+            print(f"  # Notes: {', '.join(clone_indicators)}")
+        
+        # Determine number of sectors
+        if storage == 320:
+            sectors = 5
+        elif storage == 1024:
+            sectors = 16
+        elif storage == 2048:
+            sectors = 32
+        elif storage == 4096:
+            sectors = 40  # 32 small + 8 large
+        else:
+            sectors = "Unknown"
+        
+        print(f"  # Memory: {storage} bytes ({sectors} sectors)")
+        
+        # Clean up RF field
+        try:
+            options_cleanup = {
+                'activate_rf_field': 0,
+                'wait_response': 0,
+                'keep_rf_field': 0,
+                'append_crc': 0,
+                'auto_select': 0,
+                'check_response_crc': 0,
+            }
+            self.cmd.hf14a_raw(options=options_cleanup, resp_timeout_ms=50, data=[])
+        except Exception:
+            pass
+
     def scan(self, deep=False):
         resp = self.cmd.hf14a_scan()
         if resp is not None:
@@ -1129,6 +2090,13 @@ class HF14AScan(ReaderRequiredUnit):
                     if len(resp) == 1:
                         self.get_version_info(data_tag)
                         self.get_signature_info(data_tag)
+                        # Check for DESFire/MIFARE Plus (ISO 14443-4 capable)
+                        if data_tag['sak'][0] & 0x20:
+                            self.get_desfire_info(data_tag)
+                            # Check for EMV payment cards
+                            self.get_emv_info(data_tag)
+                        # Check for MIFARE Classic variants
+                        self.get_mifare_classic_info(data_tag)
                         self.check_mf1_nt()
                         # TODO: check for ATS support on 14A3 tags
                     else:
