@@ -1391,8 +1391,8 @@ class HF14AScan(ReaderRequiredUnit):
         
         print("- EMV Detection: Starting...")
         
-        # State for T=CL session management
-        use_tcl_wrap = [None]  # None=unknown, True=use wrap, False=raw works
+        # State for T=CL session management  
+        session_active = [False]  # Track if we have an active ISO14443-4 session
         block_number = [0]
         
         def wrap_apdu_tcl(apdu):
@@ -1406,7 +1406,8 @@ class HF14AScan(ReaderRequiredUnit):
             if resp is None or len(resp) < 1:
                 return None
             pcb = resp[0]
-            if pcb in [0x02, 0x03, 0x12, 0x13]:
+            # I-block PCB: 0x02, 0x03 (toggle bit), or with chaining 0x12, 0x13
+            if (pcb & 0xE2) == 0x02:  # I-block pattern
                 return resp[1:] if len(resp) > 1 else None
             return resp
         
@@ -1423,81 +1424,60 @@ class HF14AScan(ReaderRequiredUnit):
             # When in quiet mode, reduce retries - we're just trying for bonus info
             actual_retries = 1 if quiet else retries
             
-            options = {
-                'activate_rf_field': 1,
-                'wait_response': 1,
-                'append_crc': 1,
-                'auto_select': 1,
-                'keep_rf_field': 1,
-                'check_response_crc': 1,
-            }
-            
             print(f"  # Sending {label}: {apdu.hex().upper()}")
             
             for attempt in range(actual_retries + 1):
                 if attempt > 0:
-                    # Small delay between retries to let card settle
-                    time.sleep(0.08)
+                    # Delay and reset session state for retry
+                    time.sleep(0.1)
+                    session_active[0] = False
+                    block_number[0] = 0
                     if not quiet:
                         print(f"  # Retry attempt {attempt}...")
                 
-                # If we already know which mode works, try it first
-                if use_tcl_wrap[0] == False:
-                    try:
-                        resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=apdu)
-                        if resp is not None and is_valid_sw(resp):
-                            print(f"  # Response: {resp.hex().upper()}")
-                            return resp
-                    except Exception as e:
-                        if attempt == actual_retries and not quiet:
-                            print(f"  # Error: {e}")
-                elif use_tcl_wrap[0] == True:
-                    try:
-                        # Always reset block number - each APDU is a fresh session with auto_select
-                        block_number[0] = 0
-                        wrapped = wrap_apdu_tcl(apdu)
-                        resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=wrapped)
-                        if resp is not None and len(resp) > 0:
-                            unwrapped = unwrap_response(resp)
-                            if unwrapped and is_valid_sw(unwrapped):
-                                print(f"  # Response: {unwrapped.hex().upper()}")
-                                return unwrapped
-                    except Exception as e:
-                        if attempt == actual_retries and not quiet:
-                            print(f"  # Error: {e}")
-                else:
-                    # Try raw APDU first
-                    try:
-                        resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=apdu)
-                        if resp is not None and is_valid_sw(resp):
-                            print(f"  # Response: {resp.hex().upper()}")
-                            use_tcl_wrap[0] = False
-                            return resp
-                        # Check if response has PCB prefix
-                        if resp is not None:
-                            unwrapped = unwrap_response(resp)
-                            if unwrapped and is_valid_sw(unwrapped):
-                                print(f"  # Response: {unwrapped.hex().upper()}")
-                                use_tcl_wrap[0] = True
-                                return unwrapped
-                    except Exception as e:
-                        if attempt == actual_retries and not quiet:
-                            print(f"  # Raw APDU error: {e}")
+                try:
+                    # Build options based on session state
+                    if session_active[0]:
+                        # Session active - don't re-select, just keep field and send
+                        options = {
+                            'activate_rf_field': 0,  # Field already on
+                            'wait_response': 1,
+                            'append_crc': 1,
+                            'auto_select': 0,  # DON'T re-select - breaks session!
+                            'keep_rf_field': 1,
+                            'check_response_crc': 1,
+                        }
+                    else:
+                        # Start new session - activate field and select
+                        options = {
+                            'activate_rf_field': 1,
+                            'wait_response': 1,
+                            'append_crc': 1,
+                            'auto_select': 1,  # Select card (includes RATS)
+                            'keep_rf_field': 1,
+                            'check_response_crc': 1,
+                        }
+                        block_number[0] = 0  # Reset block number for new session
                     
-                    # Try with T=CL wrapping - reset block number for fresh start
-                    try:
-                        block_number[0] = 0
-                        wrapped = wrap_apdu_tcl(apdu)
-                        resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=wrapped)
-                        if resp is not None and len(resp) > 0:
-                            unwrapped = unwrap_response(resp)
-                            if unwrapped and is_valid_sw(unwrapped):
-                                print(f"  # Response: {unwrapped.hex().upper()}")
-                                use_tcl_wrap[0] = True
-                                return unwrapped
-                    except Exception as e:
-                        if attempt == actual_retries and not quiet:
-                            print(f"  # T=CL APDU error: {e}")
+                    # Wrap APDU in I-block
+                    wrapped = wrap_apdu_tcl(apdu)
+                    resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=wrapped)
+                    
+                    if resp is not None and len(resp) > 0:
+                        # Session is now active
+                        session_active[0] = True
+                        unwrapped = unwrap_response(resp)
+                        if unwrapped and is_valid_sw(unwrapped):
+                            print(f"  # Response: {unwrapped.hex().upper()}")
+                            return unwrapped
+                        elif unwrapped:
+                            # Got response but not valid SW - still show it
+                            print(f"  # Response: {unwrapped.hex().upper()}")
+                            
+                except Exception as e:
+                    session_active[0] = False
+                    if attempt == actual_retries and not quiet:
+                        print(f"  # Error: {e}")
             
             return None
         
