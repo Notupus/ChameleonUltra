@@ -47,6 +47,171 @@ type_id_SAK_dict = {0x00: "MIFARE Ultralight Classic/C/EV1/Nano | NTAG 2xx",
                     0x38: "SmartMX with MIFARE Classic 4K",
                     }
 
+# Manufacturer lookup table based on ISO/IEC 7816-6 / ISO/IEC JTC 1/SC 17 STANDING DOCUMENT 5
+# First byte of UID identifies the IC manufacturer
+manufacturer_id_dict = {
+    0x01: "Motorola UK",
+    0x02: "STMicroelectronics SA France",
+    0x03: "Hitachi, Ltd Japan",
+    0x04: "NXP Semiconductors Germany",
+    0x05: "Infineon Technologies AG Germany",
+    0x06: "Cylink USA",
+    0x07: "Texas Instrument France",
+    0x08: "Fujitsu Limited Japan",
+    0x09: "Matsushita Electronics Corporation Japan",
+    0x0A: "NEC Japan",
+    0x0B: "Oki Electric Industry Co. Ltd Japan",
+    0x0C: "Toshiba Corp. Japan",
+    0x0D: "Mitsubishi Electric Corp. Japan",
+    0x0E: "Samsung Electronics Co. Ltd Korea",
+    0x0F: "Hynix / Hyundai Korea",
+    0x10: "LG-Semiconductors Co. Ltd Korea",
+    0x11: "Emosyn-EM Microelectronics USA",
+    0x12: "INSIDE Technology France",
+    0x13: "ORGA Kartensysteme GmbH Germany",
+    0x14: "SHARP Corporation Japan",
+    0x15: "ATMEL France",
+    0x16: "EM Microelectronic-Marin SA Switzerland",
+    0x17: "KSW Microtec GmbH Germany",
+    0x18: "ZMD AG Germany",
+    0x19: "XICOR, Inc. USA",
+    0x1A: "Sony Corporation Japan",
+    0x1B: "Malaysia Microelectronic Solutions Sdn. Bhd Malaysia",
+    0x1C: "Emosyn USA",
+    0x1D: "Shanghai Fudan Microelectronics Co. Ltd. P.R. China",
+    0x1E: "Magellan Technology Pty Limited Australia",
+    0x1F: "Melexis NV BO Switzerland",
+    0x20: "Renesas Technology Corp. Japan",
+    0x21: "TAGSYS France",
+    0x22: "Transcore USA",
+    0x23: "Shanghai Belling Corp., Ltd. China",
+    0x24: "Masktech Germany Gmbh Germany",
+    0x25: "Innovision Research and Technology Plc UK",
+    0x26: "Hitachi ULSI Systems Co., Ltd. Japan",
+    0x27: "Cypak AB Sweden",
+    0x28: "Ricoh Japan",
+    0x29: "ASK France",
+    0x2A: "Unicore Microsystems, LLC Russian Federation",
+    0x2B: "Dallas Semiconductor/Maxim USA",
+    0x2C: "Impinj, Inc. USA",
+    0x2D: "RightPlug Alliance USA",
+    0x2E: "Broadcom Corporation USA",
+    0x2F: "MStar Semiconductor, Inc Taiwan, ROC",
+    0x30: "BeeDar Technology Inc. USA",
+    0x31: "RFIDsec Denmark",
+    0x32: "Schweizer Electronic AG Germany",
+    0x33: "AMIC Technology Corp Taiwan",
+    0x34: "Mikron JSC Russia",
+    0x35: "Fraunhofer Institute for Photonic Microsystems Germany",
+    0x36: "IDS Microchip AG Switzerland",
+    0x37: "Kovio USA",
+    0x38: "HMT Microelectronic Ltd Switzerland",
+    0x39: "Silicon Craft Technology Thailand",
+    0x3A: "Advanced Film Device Inc. Japan",
+    0x3B: "Nitecrest Ltd UK",
+    0x3C: "Verayo Inc. USA",
+    0x3D: "HID Global USA",
+    0x3E: "Productivity Engineering Gmbh Germany",
+    0x3F: "Austriamicrosystems AG (reserved) Austria",
+    0x40: "Gemalto SA France",
+    0x41: "Renesas Electronics Corporation Japan",
+    0x42: "3Alogics Inc Korea",
+    0x43: "Top TroniQ Asia Limited Hong Kong",
+    0x44: "Gentag Inc USA",
+    0x45: "Invengo Information Technology Co.Ltd China",
+    0x46: "Guangzhou Sysur Microelectronics, Inc China",
+    0x47: "CEITEC S.A. Brazil",
+    0x48: "Shanghai Quanray Electronics Co. Ltd. China",
+    0x49: "MediaTek Inc Taiwan",
+    0x4A: "Angstrem PJSC Russia",
+    0x4B: "Celisic Semiconductor (Hong Kong) Limited China",
+    0x4C: "LEGIC Identsystems AG Switzerland",
+    0x4D: "Balluff GmbH Germany",
+    0x4E: "Oberthur Technologies France",
+    0x4F: "Silterra Malaysia Sdn. Bhd. Malaysia",
+    0x50: "DELTA://Danish Electronics, Light & Acoustics Denmark",
+    0x51: "Giesecke & Devrient GmbH Germany",
+    0x52: "Shenzhen China Vision Microelectronics Co., Ltd. China",
+    0x53: "Shanghai Feiju Microelectronics Co. Ltd. China",
+    0x54: "Intel Corporation USA",
+    0x55: "Microsensys GmbH Germany",
+    0x56: "Sonix Technology Co., Ltd. Taiwan",
+    0x57: "Qualcomm Technologies Inc USA",
+    0x58: "Realtek Semiconductor Corp Taiwan",
+    0x59: "Freevolt Technologies Limited UK",
+    0x5A: "Giantec Semiconductor Inc. China",
+    0x5B: "JSC Angstrem-T Russia",
+    0x5C: "STARCHIP France",
+    0x5D: "SPIRTECH France",
+    0x5E: "GANTNER Electronic GmbH Austria",
+    0x5F: "Nordic Semiconductor Norway",
+    0x60: "Verisiti Inc USA",
+    0x61: "Wearlinks Technology Inc. China",
+    0x62: "Userstar Information Systems Co., Ltd Taiwan",
+    0x63: "Pragmatic Printing Ltd. UK",
+    0x64: "Associacao do Laboratorio de Sistemas Integraveis Tecnologico - LSI-TEC Brazil",
+    0x65: "Tendyron Corporation China",
+    0x66: "MUTO Smart Co., Ltd. Korea",
+    0x67: "ON Semiconductor USA",
+    0x68: "TÜBİTAK BİLGEM Turkey",
+    0x69: "Huada Semiconductor Co., Ltd China",
+    0x6A: "SEVENEY France",
+    0x6B: "ISSM France",
+    0x6C: "Wisesec Ltd Israel",
+    0x7E: "Holtek Taiwan",
+}
+
+# NXP GET_VERSION response parsing (8 bytes response)
+# Byte 0: Fixed header (0x00)
+# Byte 1: Vendor ID (0x04 = NXP)
+# Byte 2: Product Type (0x03 = Ultralight, 0x04 = NTAG)
+# Byte 3: Product Subtype
+# Byte 4: Major Product Version
+# Byte 5: Minor Product Version
+# Byte 6: Storage Size
+# Byte 7: Protocol Type
+
+# Version-based tag identification (vendor, type, subtype, major, minor, size, proto) -> tag name
+nxp_version_map = {
+    # MIFARE Ultralight EV1
+    (0x04, 0x03, 0x01, 0x01, 0x00, 0x0B, 0x03): "MIFARE Ultralight EV1 (48 bytes)",
+    (0x04, 0x03, 0x01, 0x01, 0x00, 0x0E, 0x03): "MIFARE Ultralight EV1 (128 bytes)",
+    (0x04, 0x03, 0x02, 0x01, 0x00, 0x0B, 0x03): "MIFARE Ultralight EV1 (48 bytes)",
+    (0x04, 0x03, 0x02, 0x01, 0x00, 0x0E, 0x03): "MIFARE Ultralight EV1 (128 bytes)",
+    # MIFARE Ultralight Nano
+    (0x04, 0x03, 0x02, 0x01, 0x00, 0x08, 0x03): "MIFARE Ultralight Nano (40 bytes)",
+    # MIFARE Ultralight AES
+    (0x04, 0x03, 0x04, 0x01, 0x00, 0x0E, 0x03): "MIFARE Ultralight AES",
+    # NTAG 210
+    (0x04, 0x04, 0x01, 0x01, 0x00, 0x0B, 0x03): "NTAG 210",
+    # NTAG 212
+    (0x04, 0x04, 0x01, 0x01, 0x00, 0x0E, 0x03): "NTAG 212",
+    # NTAG 213
+    (0x04, 0x04, 0x02, 0x01, 0x00, 0x0F, 0x03): "NTAG 213",
+    (0x53, 0x04, 0x02, 0x01, 0x00, 0x0F, 0x03): "NTAG 213 (Shanghai Feiju)",  # Clone
+    # NTAG 213F
+    (0x04, 0x04, 0x04, 0x01, 0x00, 0x0F, 0x03): "NTAG 213F",
+    # NTAG 213 TT
+    (0x04, 0x04, 0x02, 0x01, 0x01, 0x0F, 0x03): "NTAG 213 TT",
+    # NTAG 215
+    (0x04, 0x04, 0x02, 0x01, 0x00, 0x11, 0x03): "NTAG 215",
+    # NTAG 216
+    (0x04, 0x04, 0x02, 0x01, 0x00, 0x13, 0x03): "NTAG 216",
+    # NTAG 216F
+    (0x04, 0x04, 0x04, 0x01, 0x00, 0x13, 0x03): "NTAG 216F",
+    # NTAG I2C 1K
+    (0x04, 0x04, 0x05, 0x02, 0x01, 0x13, 0x03): "NTAG I2C 1K",
+    # NTAG I2C 2K
+    (0x04, 0x04, 0x05, 0x02, 0x01, 0x15, 0x03): "NTAG I2C 2K",
+    # NTAG I2C Plus 1K
+    (0x04, 0x04, 0x05, 0x02, 0x02, 0x13, 0x03): "NTAG I2C Plus 1K",
+    # NTAG I2C Plus 2K
+    (0x04, 0x04, 0x05, 0x02, 0x02, 0x15, 0x03): "NTAG I2C Plus 2K",
+    # Mikron MIK640D (Ultralight EV1 compatible)
+    (0x34, 0x21, 0x01, 0x01, 0x00, 0x0B, 0x03): "Mikron MIK640D (48 bytes)",
+    (0x34, 0x21, 0x01, 0x01, 0x00, 0x0E, 0x03): "Mikron MIK640D (128 bytes)",
+}
+
 default_cwd = Path.cwd() / Path(__file__).with_name("bin")
 
 
@@ -775,6 +940,120 @@ class HF14AScan(ReaderRequiredUnit):
         if int_sak in type_id_SAK_dict:
             print(f"- Guessed type(s) from SAK: {type_id_SAK_dict[int_sak]}")
 
+    def manufacturer_info(self, data_tag):
+        """Get manufacturer info from UID first byte"""
+        uid = data_tag['uid']
+        if len(uid) >= 1:
+            mfr_id = uid[0]
+            if mfr_id in manufacturer_id_dict:
+                print(f"- Manufacturer: {manufacturer_id_dict[mfr_id]} (0x{mfr_id:02X})")
+            else:
+                print(f"- Manufacturer: Unknown (0x{mfr_id:02X})")
+
+    def get_version_info(self, data_tag):
+        """Send GET_VERSION command and parse response for NXP tags"""
+        int_sak = data_tag['sak'][0]
+        
+        # Only try GET_VERSION for tags that might support it (SAK 0x00 = Ultralight/NTAG)
+        # or NXP tags (first byte 0x04 in UID)
+        uid = data_tag['uid']
+        is_nxp = len(uid) >= 1 and uid[0] == 0x04
+        
+        if int_sak != 0x00 and not is_nxp:
+            return
+        
+        options = {
+            'activate_rf_field': 0,
+            'wait_response': 1,
+            'append_crc': 1,
+            'auto_select': 1,
+            'keep_rf_field': 1,
+            'check_response_crc': 1,
+        }
+        
+        try:
+            # Send GET_VERSION command (0x60)
+            version = self.cmd.hf14a_raw(options=options, resp_timeout_ms=100, data=struct.pack('!B', 0x60))
+            if version is not None and len(version) == 8:
+                print(f"- GET_VERSION: {version.hex().upper()}")
+                
+                vendor_id = version[0]
+                prod_type = version[1]
+                prod_subtype = version[2]
+                major_ver = version[3]
+                minor_ver = version[4]
+                storage_size = version[5]
+                protocol_type = version[6]
+                
+                # Look up specific tag in version map
+                version_key = (vendor_id, prod_type, prod_subtype, major_ver, minor_ver, storage_size, protocol_type)
+                if version_key in nxp_version_map:
+                    print(f"  # Identified: {nxp_version_map[version_key]}")
+                else:
+                    # Generic identification based on product type
+                    prod_type_names = {
+                        0x03: "MIFARE Ultralight",
+                        0x04: "NTAG",
+                    }
+                    prod_name = prod_type_names.get(prod_type, f"Unknown (0x{prod_type:02X})")
+                    
+                    # Calculate storage capacity
+                    storage_bytes = 2 ** (storage_size >> 1) if storage_size > 0 else 0
+                    if storage_size & 0x01:
+                        storage_bytes = storage_bytes + (storage_bytes // 2)
+                    
+                    print(f"  # Product Type: {prod_name}")
+                    print(f"  # Version: {major_ver}.{minor_ver}")
+                    print(f"  # Storage: ~{storage_bytes} bytes")
+        except Exception:
+            pass  # Tag doesn't support GET_VERSION
+        
+        # Try to detect Ultralight C via AUTHENTICATE command
+        if int_sak == 0x00:
+            try:
+                options['keep_rf_field'] = 1
+                auth_resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=100, data=struct.pack('!B', 0x1A))
+                if auth_resp is not None and len(auth_resp) > 0:
+                    print("  # Supports 3DES Authentication (Ultralight C)")
+            except Exception:
+                pass
+        
+        # Clean up RF field
+        try:
+            options['activate_rf_field'] = 0
+            options['wait_response'] = 0
+            options['keep_rf_field'] = 0
+            self.cmd.hf14a_raw(options=options, resp_timeout_ms=100, data=[])
+        except Exception:
+            pass
+
+    def get_signature_info(self, data_tag):
+        """Send READ_SIG command to get NXP originality signature"""
+        int_sak = data_tag['sak'][0]
+        uid = data_tag['uid']
+        
+        # Only for Ultralight/NTAG (SAK 0x00) and NXP (UID[0] = 0x04)
+        if int_sak != 0x00 or len(uid) < 1 or uid[0] != 0x04:
+            return
+        
+        options = {
+            'activate_rf_field': 0,
+            'wait_response': 1,
+            'append_crc': 1,
+            'auto_select': 1,
+            'keep_rf_field': 0,
+            'check_response_crc': 1,
+        }
+        
+        try:
+            # Send READ_SIG command (0x3C) with address 0x00
+            signature = self.cmd.hf14a_raw(options=options, resp_timeout_ms=100, data=struct.pack('!BB', 0x3C, 0x00))
+            if signature is not None and len(signature) == 32:
+                print(f"- Signature: {signature.hex().upper()}")
+                print("  # NXP originality signature present")
+        except Exception:
+            pass  # Tag doesn't support READ_SIG
+
     def scan(self, deep=False):
         resp = self.cmd.hf14a_scan()
         if resp is not None:
@@ -786,9 +1065,12 @@ class HF14AScan(ReaderRequiredUnit):
                 if len(data_tag['ats']) > 0:
                     print(f"- ATS  : {data_tag['ats'].hex().upper()}")
                 if deep:
+                    self.manufacturer_info(data_tag)
                     self.sak_info(data_tag)
                     # TODO: following checks cannot be done yet if multiple cards are present
                     if len(resp) == 1:
+                        self.get_version_info(data_tag)
+                        self.get_signature_info(data_tag)
                         self.check_mf1_nt()
                         # TODO: check for ATS support on 14A3 tags
                     else:

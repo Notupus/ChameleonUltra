@@ -4,6 +4,7 @@
 #include "bsp_delay.h"
 #include "rgb_marquee.h"
 #include "bsp_time.h"
+#include "app_timer.h"
 
 
 #define NRF_LOG_MODULE_NAME rgb
@@ -499,6 +500,20 @@ bool is_rgb_marquee_enable(void) {
     return g_usb_led_marquee_enable;
 }
 
+// Global variable for current slot color (used for idle animation)
+static uint8_t g_slot_color = RGB_GREEN;
+static uint8_t g_current_slot = 0;
+
+/**
+ * @brief Set the active slot info for LED animations
+ * @param slot Current slot number (0-7)
+ * @param color Color for the slot (RGB_RED, RGB_GREEN, RGB_BLUE, etc)
+ */
+void rgb_set_slot_info(uint8_t slot, uint8_t color) {
+    g_current_slot = slot;
+    g_slot_color = color;
+}
+
 /**
  * @brief RGB bootup animation - trailing effect with smooth rainbow color transition
  */
@@ -539,7 +554,7 @@ void rgb_bootup_animation(void) {
                     nrf_gpio_pin_set(led_pins[pos]);
                 }
             }
-            bsp_delay_ms(20);
+            bsp_delay_ms(45);  // Slower animation
         }
         
         // Reverse direction with trailing effect and continued color cycling
@@ -563,11 +578,101 @@ void rgb_bootup_animation(void) {
                     nrf_gpio_pin_set(led_pins[pos]);
                 }
             }
-            bsp_delay_ms(20);
+            bsp_delay_ms(45);  // Slower animation
         }
     }
     
     // Clear all LEDs at end
+    for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
+        nrf_gpio_pin_clear(led_pins[i]);
+    }
+}
+
+/**
+ * @brief Flash the current slot LED to indicate active tag
+ * @param slot Current slot (0-7)
+ * @param color Color to flash (based on tag type: R=dual, G=HF, B=LF)
+ */
+void rgb_flash_slot_indicator(uint8_t slot, uint8_t color) {
+    uint32_t *led_pins = hw_get_led_array();
+    
+    set_slot_light_color(color);
+    
+    // Flash 3 times
+    for (uint8_t i = 0; i < 3; i++) {
+        nrf_gpio_pin_set(led_pins[slot]);
+        bsp_delay_ms(150);
+        nrf_gpio_pin_clear(led_pins[slot]);
+        bsp_delay_ms(100);
+    }
+    
+    // Leave it on
+    nrf_gpio_pin_set(led_pins[slot]);
+}
+
+/**
+ * @brief Non-blocking idle cycling animation (call from main loop)
+ * @return true if animation step was performed
+ */
+bool rgb_idle_cycle_step(void) {
+    static uint32_t last_update = 0;
+    static uint8_t cycle_pos = 0;
+    static uint8_t cycle_color_idx = 0;
+    static bool forward = true;
+    
+    uint32_t now = app_timer_cnt_get();
+    
+    // Update every 80ms for a gentle cycle
+    if (app_timer_cnt_diff_compute(now, last_update) < APP_TIMER_TICKS(80)) {
+        return false;
+    }
+    last_update = now;
+    
+    uint32_t *led_pins = hw_get_led_array();
+    uint8_t colors[] = {RGB_RED, RGB_YELLOW, RGB_GREEN, RGB_CYAN, RGB_BLUE, RGB_MAGENTA};
+    
+    // Clear all LEDs
+    for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
+        nrf_gpio_pin_clear(led_pins[i]);
+    }
+    
+    // Set color and light current position with trail
+    set_slot_light_color(colors[cycle_color_idx]);
+    
+    // Trail of 2 LEDs
+    for (int8_t t = 0; t < 2; t++) {
+        int8_t pos = forward ? (cycle_pos - t) : (cycle_pos + t);
+        if (pos >= 0 && pos < RGB_LIST_NUM) {
+            nrf_gpio_pin_set(led_pins[pos]);
+        }
+    }
+    
+    // Update position
+    if (forward) {
+        cycle_pos++;
+        if (cycle_pos >= RGB_LIST_NUM + 1) {
+            forward = false;
+            cycle_pos = RGB_LIST_NUM - 1;
+            cycle_color_idx = (cycle_color_idx + 1) % 6;
+        }
+    } else {
+        if (cycle_pos == 0) {
+            forward = true;
+            cycle_color_idx = (cycle_color_idx + 1) % 6;
+        } else {
+            cycle_pos--;
+        }
+    }
+    
+    return true;
+}
+
+/**
+ * @brief Reset idle cycle state
+ */
+void rgb_idle_cycle_reset(void) {
+    // Force reset by clearing static vars on next call
+    uint32_t *led_pins = hw_get_led_array();
     for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
         nrf_gpio_pin_clear(led_pins[i]);
     }

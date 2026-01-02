@@ -51,7 +51,7 @@ jobs:
     needs: build_fw_builder
     strategy:
       matrix:
-        device_type: [ultra, lite]
+        device_type: [ultra]
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4

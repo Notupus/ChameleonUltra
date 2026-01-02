@@ -16,5 +16,9 @@ void ledblink4(uint8_t color, uint8_t dir, uint8_t end, uint8_t start_light, uin
 void ledblink5(uint8_t color, uint8_t start, uint8_t stop);
 void ledblink6(void);
 void rgb_bootup_animation(void);
+void rgb_flash_slot_indicator(uint8_t slot, uint8_t color);
+void rgb_set_slot_info(uint8_t slot, uint8_t color);
+bool rgb_idle_cycle_step(void);
+void rgb_idle_cycle_reset(void);
 
 #endif

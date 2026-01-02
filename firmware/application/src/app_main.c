@@ -460,14 +460,18 @@ static void check_wakeup_src(void) {
         // Button wake-up boot animation
         uint8_t animation_config = settings_get_animation_config();
         if (animation_config == SettingsAnimationModeFull) {
-            ledblink2(color, !dir, 11);
-            ledblink2(color, dir, 11);
-            ledblink2(color, !dir, dir ? slot : 7 - slot);
+            // Play rainbow bootup animation on button wake
+            rgb_bootup_animation();
+            // Flash slot indicator
+            rgb_flash_slot_indicator(slot, color);
         } else if (animation_config == SettingsAnimationModeMinimal) {
             ledblink2(color, !dir, dir ? slot : 7 - slot);
         } else {
             set_slot_light_color(color);
         }
+        
+        // Store slot info for idle animation
+        rgb_set_slot_info(slot, color);
 
         // The indicator of the current card slot lights up at the end of the animation
         light_up_by_slot();
@@ -970,9 +974,14 @@ int main(void) {
     check_wakeup_src();       // Detect wake-up source and decide BLE broadcast and subsequent hibernation action according to the wake-up source
     tag_mode_enter();         // Enter card emulation mode by default
 
-    // Play bootup animation (skip if woken by LF field)
+    // Play bootup animation and slot indicator (skip if woken by LF field)
     if (!(m_gpregret_val & RESET_ON_LF_FIELD_EXISTS_Msk)) {
         rgb_bootup_animation();
+        // Flash the current slot indicator to show active tag
+        uint8_t slot = tag_emulation_get_slot();
+        uint8_t color = get_color_by_slot(slot);
+        rgb_flash_slot_indicator(slot, color);
+        rgb_set_slot_info(slot, color);
     }
 
     // usbd event listener
@@ -993,8 +1002,14 @@ int main(void) {
 #endif
         
         // Led blink at usb status (only if field generator is off)
+        // Also run idle RGB cycle when not doing other LED activities
         if (!m_is_field_on) {
-            blink_usb_led_status();
+            if (g_usb_led_marquee_enable) {
+                blink_usb_led_status();
+            } else {
+                // Idle cycling animation until sleep
+                rgb_idle_cycle_step();
+            }
         }
         
         // Data pack process

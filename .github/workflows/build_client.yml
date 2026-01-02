@@ -26,12 +26,6 @@ jobs:
               true
             bundle_command: |
               (cd software/dist && zip -r "$OLDPWD/client-linux.zip" .)
-          - name: macos
-            os: macos-latest
-            pre_command: |
-              true
-            bundle_command: |
-              (cd software/dist && zip -r "$OLDPWD/client-macos.zip" .)
     runs-on: ${{ matrix.os }}
     steps:
       - name: Check out the repo
