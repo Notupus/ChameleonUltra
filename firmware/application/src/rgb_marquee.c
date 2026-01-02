@@ -498,3 +498,77 @@ void ledblink6(void) {
 bool is_rgb_marquee_enable(void) {
     return g_usb_led_marquee_enable;
 }
+
+/**
+ * @brief RGB bootup animation - trailing effect with smooth rainbow color transition
+ */
+void rgb_bootup_animation(void) {
+    uint32_t *led_pins = hw_get_led_array();
+    uint8_t colors[] = {RGB_RED, RGB_YELLOW, RGB_GREEN, RGB_CYAN, RGB_BLUE, RGB_MAGENTA};
+    uint8_t num_colors = sizeof(colors) / sizeof(colors[0]);
+    uint8_t trail_length = 3;  // Number of LEDs in the trail
+    uint8_t color_idx = 0;     // Current color index for smooth transition
+    uint8_t steps_per_color = 4; // Steps before transitioning to next color
+    uint8_t step_count = 0;
+    
+    // Clear all LEDs first
+    for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
+        nrf_gpio_pin_clear(led_pins[i]);
+    }
+    
+    // Trailing animation: circle around with smooth color changes
+    for (uint8_t loop = 0; loop < 2; loop++) {
+        // Forward direction with trailing effect and color cycling
+        for (uint8_t head = 0; head < RGB_LIST_NUM + trail_length; head++) {
+            // Smoothly cycle color every few steps
+            if (++step_count >= steps_per_color) {
+                step_count = 0;
+                color_idx = (color_idx + 1) % num_colors;
+            }
+            set_slot_light_color(colors[color_idx]);
+            
+            // Turn off all LEDs
+            for (uint8_t j = 0; j < RGB_LIST_NUM; j++) {
+                nrf_gpio_pin_clear(led_pins[j]);
+            }
+            
+            // Light up trail LEDs (head and trailing positions)
+            for (uint8_t t = 0; t < trail_length; t++) {
+                int8_t pos = head - t;
+                if (pos >= 0 && pos < RGB_LIST_NUM) {
+                    nrf_gpio_pin_set(led_pins[pos]);
+                }
+            }
+            bsp_delay_ms(20);
+        }
+        
+        // Reverse direction with trailing effect and continued color cycling
+        for (int8_t head = RGB_LIST_NUM - 1; head >= -((int8_t)trail_length - 1); head--) {
+            // Smoothly cycle color every few steps
+            if (++step_count >= steps_per_color) {
+                step_count = 0;
+                color_idx = (color_idx + 1) % num_colors;
+            }
+            set_slot_light_color(colors[color_idx]);
+            
+            // Turn off all LEDs
+            for (uint8_t j = 0; j < RGB_LIST_NUM; j++) {
+                nrf_gpio_pin_clear(led_pins[j]);
+            }
+            
+            // Light up trail LEDs
+            for (uint8_t t = 0; t < trail_length; t++) {
+                int8_t pos = head + t;
+                if (pos >= 0 && pos < RGB_LIST_NUM) {
+                    nrf_gpio_pin_set(led_pins[pos]);
+                }
+            }
+            bsp_delay_ms(20);
+        }
+    }
+    
+    // Clear all LEDs at end
+    for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
+        nrf_gpio_pin_clear(led_pins[i]);
+    }
+}

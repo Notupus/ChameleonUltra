@@ -970,6 +970,11 @@ int main(void) {
     check_wakeup_src();       // Detect wake-up source and decide BLE broadcast and subsequent hibernation action according to the wake-up source
     tag_mode_enter();         // Enter card emulation mode by default
 
+    // Play bootup animation (skip if woken by LF field)
+    if (!(m_gpregret_val & RESET_ON_LF_FIELD_EXISTS_Msk)) {
+        rgb_bootup_animation();
+    }
+
     // usbd event listener
     APP_ERROR_CHECK(app_usbd_power_events_enable());
 
