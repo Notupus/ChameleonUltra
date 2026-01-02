@@ -1630,7 +1630,7 @@ class HF14AScan(ReaderRequiredUnit):
                 found_apps.append(aid)
             
             # If we found AIDs from PPSE, try to select and read each app
-            # Also try common AIDs directly
+            # Also try common AIDs directly too
             aids_to_try = list(set(found_apps + ['A0000000031010', 'A0000000041010', 'A00000002501']))
             
             for aid_hex in aids_to_try:
