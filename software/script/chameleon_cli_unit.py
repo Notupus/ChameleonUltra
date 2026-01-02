@@ -1006,6 +1006,53 @@ class HF14AScan(ReaderRequiredUnit):
         if int_sak in type_id_SAK_dict:
             print(f"- Guessed type(s) from SAK: {type_id_SAK_dict[int_sak]}")
 
+    def ats_info(self, data_tag):
+        """Parse ATS (Answer To Select) to identify ISO 14443-4 card type"""
+        ats = data_tag.get('ats', b'')
+        if len(ats) < 2:
+            return
+        
+        # ATS format: TL T0 [TA] [TB] [TC] [Historical bytes]
+        # TL = length, T0 indicates presence of TA/TB/TC
+        tl = ats[0]
+        if tl < 2 or tl > len(ats):
+            return
+            
+        t0 = ats[1]
+        idx = 2
+        
+        # Check for TA, TB, TC presence
+        if t0 & 0x10:  # TA present
+            idx += 1
+        if t0 & 0x20:  # TB present  
+            idx += 1
+        if t0 & 0x40:  # TC present
+            idx += 1
+        
+        # Historical bytes start at idx
+        if idx < len(ats):
+            hist_bytes = ats[idx:]
+            
+            # Try to decode as ASCII (common for card identification)
+            try:
+                ascii_str = hist_bytes.decode('ascii', errors='ignore')
+                ascii_str = ''.join(c if c.isprintable() else '' for c in ascii_str)
+                if len(ascii_str) >= 3:
+                    print(f"  # Card ID from ATS: {ascii_str}")
+            except Exception:
+                pass
+            
+            # Check for known patterns
+            # DESFire pattern: 80 31 80 66 B1 84 0C 01 6E 01 83 00 90 00
+            if len(hist_bytes) >= 2 and hist_bytes[0] == 0x80:
+                print(f"  # Historical bytes indicate DESFire-type tag")
+            # JCOP pattern
+            elif len(hist_bytes) >= 4 and hist_bytes[:4] == b'JCOP':
+                print(f"  # NXP JCOP card detected")
+            # Check for payment card indicators
+            elif b'VISA' in hist_bytes or b'MC' in hist_bytes:
+                print(f"  # Payment card indicator found in ATS")
+
     def manufacturer_info(self, data_tag):
         """Get manufacturer info from UID first byte"""
         uid = data_tag['uid']
@@ -1342,6 +1389,43 @@ class HF14AScan(ReaderRequiredUnit):
         if not (int_sak & 0x20):
             return
         
+        # ISO 14443-4 T=CL I-block sequence number
+        block_number = [0]  # Using list to allow modification in nested function
+        
+        def wrap_apdu(apdu):
+            """Wrap APDU in ISO 14443-4 I-block"""
+            # I-block PCB: 0x02 (block 0) or 0x03 (block 1)
+            pcb = 0x02 | (block_number[0] & 0x01)
+            block_number[0] = (block_number[0] + 1) & 0x01
+            return bytes([pcb]) + apdu
+        
+        def unwrap_response(resp):
+            """Unwrap ISO 14443-4 response, handling I-blocks and chaining"""
+            if resp is None or len(resp) < 1:
+                return None
+            # Response format: [PCB] [data...] (CRC already stripped by firmware)
+            pcb = resp[0]
+            # Check if it's an I-block response (bit 7-6 = 00)
+            if (pcb & 0xE2) == 0x02:  # I-block
+                return resp[1:]  # Return data without PCB
+            elif (pcb & 0xF2) == 0xA2:  # R-block (ACK/NAK)
+                return None  # No data
+            elif (pcb & 0xC0) == 0xC0:  # S-block
+                return None  # Control block
+            else:
+                # Might be direct response (no T=CL wrapping)
+                return resp
+        
+        def send_apdu(apdu, options, timeout=300, use_tcl=True):
+            """Send APDU with optional ISO 14443-4 T=CL wrapping"""
+            if use_tcl:
+                wrapped = wrap_apdu(apdu)
+                resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=wrapped)
+                return unwrap_response(resp)
+            else:
+                resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=apdu)
+                return resp
+        
         # Known payment application AIDs
         payment_aids = {
             'A0000000031010': ('Visa', 'Visa Credit/Debit'),
@@ -1602,6 +1686,7 @@ class HF14AScan(ReaderRequiredUnit):
         
         found_apps = []
         card_info = {}
+        use_tcl = True  # Try with T=CL wrapping first
         
         try:
             # Select PPSE (Proximity Payment System Environment) for contactless
@@ -1609,14 +1694,25 @@ class HF14AScan(ReaderRequiredUnit):
             ppse_name = bytes([0x32, 0x50, 0x41, 0x59, 0x2E, 0x53, 0x59, 0x53, 0x2E, 0x44, 0x44, 0x46, 0x30, 0x31])  # 2PAY.SYS.DDF01
             select_ppse = bytes([0x00, 0xA4, 0x04, 0x00, len(ppse_name)]) + ppse_name + bytes([0x00])
             
-            resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=300, data=select_ppse)
+            # Try with T=CL wrapping first
+            resp = send_apdu(select_ppse, options, timeout=300, use_tcl=True)
             
             if resp is None or len(resp) < 2:
+                # Try without T=CL wrapping (some cards may not need it)
+                block_number[0] = 0  # Reset block number
+                resp = send_apdu(select_ppse, options, timeout=300, use_tcl=False)
+                if resp is not None and len(resp) >= 2:
+                    use_tcl = False
+            
+            if resp is None or len(resp) < 2:
+                # No response - not a payment card
                 return
             
             # Check for successful response (SW1 SW2 = 90 00)
             sw1, sw2 = resp[-2], resp[-1]
             if sw1 != 0x90 or sw2 != 0x00:
+                # PPSE not found - not a contactless payment card
+                # Could be DESFire, ACOS, or other ISO14443-4 card
                 return
             
             # Parse PPSE response
@@ -1639,7 +1735,7 @@ class HF14AScan(ReaderRequiredUnit):
                     select_aid = bytes([0x00, 0xA4, 0x04, 0x00, len(aid_bytes)]) + aid_bytes + bytes([0x00])
                     
                     options['activate_rf_field'] = 0  # Already activated
-                    resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=300, data=select_aid)
+                    resp = send_apdu(select_aid, options, timeout=300, use_tcl=use_tcl)
                     
                     if resp is None or len(resp) < 2:
                         continue
@@ -1680,7 +1776,7 @@ class HF14AScan(ReaderRequiredUnit):
                     gpo_data = bytes([0x83, 0x00])  # Minimal PDOL
                     gpo_cmd = bytes([0x80, 0xA8, 0x00, 0x00, len(gpo_data)]) + gpo_data + bytes([0x00])
                     
-                    gpo_resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=300, data=gpo_cmd)
+                    gpo_resp = send_apdu(gpo_cmd, options, timeout=300, use_tcl=use_tcl)
                     
                     afl = None
                     if gpo_resp and len(gpo_resp) >= 2:
@@ -1707,7 +1803,7 @@ class HF14AScan(ReaderRequiredUnit):
                                 p2 = (sfi << 3) | 0x04
                                 read_cmd = bytes([0x00, 0xB2, rec, p2, 0x00])
                                 
-                                rec_resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=200, data=read_cmd)
+                                rec_resp = send_apdu(read_cmd, options, timeout=200, use_tcl=use_tcl)
                                 
                                 if rec_resp and len(rec_resp) >= 2:
                                     rec_sw1, rec_sw2 = rec_resp[-2], rec_resp[-1]
@@ -1849,6 +1945,103 @@ class HF14AScan(ReaderRequiredUnit):
             pass  # Card doesn't support EMV or communication error
         
         # Clean up RF field
+        try:
+            options['activate_rf_field'] = 0
+            options['wait_response'] = 0
+            options['keep_rf_field'] = 0
+            self.cmd.hf14a_raw(options=options, resp_timeout_ms=100, data=[])
+        except Exception:
+            pass
+
+    def scan_iso7816_apps(self, data_tag):
+        """Scan for ISO 7816 applications on the card (non-EMV)"""
+        int_sak = data_tag['sak'][0]
+        
+        # Only for ISO 14443-4 cards
+        if not (int_sak & 0x20):
+            return
+        
+        # ISO 14443-4 T=CL I-block sequence number
+        block_number = [0]
+        
+        def wrap_apdu(apdu):
+            pcb = 0x02 | (block_number[0] & 0x01)
+            block_number[0] = (block_number[0] + 1) & 0x01
+            return bytes([pcb]) + apdu
+        
+        def unwrap_response(resp):
+            if resp is None or len(resp) < 1:
+                return None
+            pcb = resp[0]
+            if (pcb & 0xE2) == 0x02:
+                return resp[1:]
+            return resp
+        
+        def send_apdu(apdu, options, timeout=300):
+            wrapped = wrap_apdu(apdu)
+            resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=wrapped)
+            return unwrap_response(resp)
+        
+        # Common non-payment application AIDs to check
+        app_aids = {
+            # Identity / Government
+            'A0000002471001': ('MRTD', 'e-Passport/e-ID'),
+            'A000000167455349474E': ('eIDAS', 'EU eID Sign'),
+            'D276000085010101': ('ID Card', 'German nPA'),
+            'D27600006601': ('German Health', 'eGK Health Card'),
+            'A000000308': ('ICAO', 'LDS'),
+            # Transport
+            'D4100000030001': ('Clipper', 'SF Transit'),
+            'A00000040400': ('FeliCa', 'Transit'),
+            'D2760000850101': ('VDV', 'German Transit'),
+            # Access Control
+            'A0000005271002': ('PIV', 'US Federal PIV'),
+            'A000000397': ('CAC', 'US Military CAC'),
+            'A0000001510000': ('GlobalPlatform', 'Card Manager'),
+            # Loyalty/Other
+            'F0010203040506': ('Proprietary', 'Custom App'),
+        }
+        
+        options = {
+            'activate_rf_field': 1,
+            'wait_response': 1,
+            'append_crc': 1,
+            'auto_select': 1,
+            'keep_rf_field': 1,
+            'check_response_crc': 1,
+        }
+        
+        found_apps = []
+        
+        try:
+            for aid_hex, (app_type, app_name) in app_aids.items():
+                try:
+                    aid_bytes = bytes.fromhex(aid_hex)
+                    select_aid = bytes([0x00, 0xA4, 0x04, 0x00, len(aid_bytes)]) + aid_bytes + bytes([0x00])
+                    
+                    block_number[0] = 0  # Reset block number for each attempt
+                    resp = send_apdu(select_aid, options, timeout=200)
+                    options['activate_rf_field'] = 0  # Keep RF on after first
+                    
+                    if resp is not None and len(resp) >= 2:
+                        sw1, sw2 = resp[-2], resp[-1]
+                        if sw1 == 0x90 and sw2 == 0x00:
+                            found_apps.append((aid_hex, app_type, app_name))
+                        elif sw1 == 0x61:  # More data available
+                            found_apps.append((aid_hex, app_type, app_name))
+                except Exception:
+                    pass
+            
+            if found_apps:
+                print(f"- ISO 7816 Applications Found:")
+                for aid, app_type, app_name in found_apps:
+                    print(f"  # {app_type}: {app_name}")
+                    print(f"    AID: {aid}")
+                    
+        except Exception:
+            pass
+        
+        # Clean up
         try:
             options['activate_rf_field'] = 0
             options['wait_response'] = 0
@@ -2080,6 +2273,9 @@ class HF14AScan(ReaderRequiredUnit):
                 if deep:
                     self.manufacturer_info(data_tag)
                     self.sak_info(data_tag)
+                    # Parse ATS for ISO 14443-4 cards
+                    if len(data_tag['ats']) > 0:
+                        self.ats_info(data_tag)
                     # TODO: following checks cannot be done yet if multiple cards are present
                     if len(resp) == 1:
                         self.get_version_info(data_tag)
@@ -2089,6 +2285,8 @@ class HF14AScan(ReaderRequiredUnit):
                             self.get_desfire_info(data_tag)
                             # Check for EMV payment cards
                             self.get_emv_info(data_tag)
+                            # Scan for other ISO 7816 applications
+                            self.scan_iso7816_apps(data_tag)
                         # Check for MIFARE Classic variants
                         self.get_mifare_classic_info(data_tag)
                         self.check_mf1_nt()

@@ -4,6 +4,7 @@
 #include "bsp_delay.h"
 #include "rgb_marquee.h"
 #include "bsp_time.h"
+#include "app_timer.h"
 
 
 #define NRF_LOG_MODULE_NAME rgb
@@ -237,6 +238,9 @@ void ledblink3(uint8_t led_down, uint8_t color_led_down, uint8_t led_up, uint8_t
             callback_waiting = 0;
             light_level --;
         }
+    }
+    for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
+        nrf_gpio_pin_clear(led_pins[i]);
     }
     if (led_up >= 0 && led_up <= 7) {
         //Treatment
@@ -494,4 +498,369 @@ void ledblink6(void) {
  */
 bool is_rgb_marquee_enable(void) {
     return g_usb_led_marquee_enable;
+}
+
+// External functions from rfid_main.c and tag_emulation.c
+extern uint8_t tag_emulation_get_slot(void);
+extern uint8_t get_color_by_slot(uint8_t slot);
+
+// PWM color definitions for smooth fading (R, G, B duty values, 0 = full on, 1000 = off)
+typedef struct {
+    uint16_t r;
+    uint16_t g;
+    uint16_t b;
+} rgb_pwm_color_t;
+
+// Extended color palette using PWM mixing
+static const rgb_pwm_color_t pwm_colors[] = {
+    {0, 1000, 1000},     // 0: Red
+    {1000, 0, 1000},     // 1: Green  
+    {1000, 1000, 0},     // 2: Blue
+    {0, 0, 1000},        // 3: Yellow (R+G)
+    {1000, 0, 0},        // 4: Cyan (G+B)
+    {0, 1000, 0},        // 5: Magenta (R+B)
+    {0, 0, 0},           // 6: White (R+G+B)
+    {300, 1000, 1000},   // 7: Orange (more R, less G)
+    {500, 0, 1000},      // 8: Spring Green
+    {1000, 500, 0},      // 9: Azure
+    {500, 1000, 0},      // 10: Violet
+    {0, 500, 1000},      // 11: Rose
+    {1000, 0, 500},      // 12: Teal
+};
+#define NUM_PWM_COLORS 13
+
+// Rainbow color sequence indices (bright vivid colors)
+static const uint8_t rainbow_sequence[] = {0, 7, 3, 8, 1, 12, 4, 9, 2, 10, 5, 11};
+#define RAINBOW_LEN 12
+
+/**
+ * @brief Set RGB color using PWM values for smooth color mixing
+ */
+static void set_pwm_color(const rgb_pwm_color_t *color) {
+    // Use PWM for smooth color control
+    // Lower value = brighter (inverted logic)
+    pwm_sequ_val.channel_0 = color->r;  
+    pwm_sequ_val.channel_1 = color->g;
+    pwm_sequ_val.channel_2 = color->b;
+    pwm_sequ_val.channel_3 = 1000; // Unused
+}
+
+/**
+ * @brief Set RGB color with brightness level (0-99)
+ */
+static void set_pwm_color_brightness(const rgb_pwm_color_t *color, uint8_t brightness) {
+    uint16_t scale = brightness;
+    // Invert: 0 brightness = all channels off (1000), 99 brightness = original values
+    pwm_sequ_val.channel_0 = 1000 - ((1000 - color->r) * scale / 99);
+    pwm_sequ_val.channel_1 = 1000 - ((1000 - color->g) * scale / 99);
+    pwm_sequ_val.channel_2 = 1000 - ((1000 - color->b) * scale / 99);
+    pwm_sequ_val.channel_3 = 1000;
+}
+
+/**
+ * @brief Interpolate between two PWM colors
+ * @param c1 First color
+ * @param c2 Second color  
+ * @param t Interpolation factor 0-255 (0=c1, 255=c2)
+ * @param out Output color
+ */
+static void interpolate_color(const rgb_pwm_color_t *c1, const rgb_pwm_color_t *c2, uint8_t t, rgb_pwm_color_t *out) {
+    out->r = c1->r + (((int32_t)(c2->r - c1->r)) * t / 255);
+    out->g = c1->g + (((int32_t)(c2->g - c1->g)) * t / 255);
+    out->b = c1->b + (((int32_t)(c2->b - c1->b)) * t / 255);
+}
+
+/**
+ * @brief Get the basic color enum from slot color index
+ */
+static uint8_t slot_color_to_enum(uint8_t slot_color) {
+    // slot_color: 0=R (dual freq), 1=G (HF), 2=B (LF)
+    switch (slot_color) {
+        case 0: return RGB_RED;
+        case 1: return RGB_GREEN;
+        case 2: return RGB_BLUE;
+        default: return RGB_GREEN;
+    }
+}
+
+/**
+ * @brief RGB bootup animation - rainbow spiral converging to slot with PWM fading
+ */
+void rgb_bootup_animation(void) {
+    uint32_t *led_pins = hw_get_led_array();
+    uint8_t slot = tag_emulation_get_slot();
+    uint8_t slot_color = get_color_by_slot(slot);
+    
+    // Clear all LEDs first
+    for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
+        nrf_gpio_pin_clear(led_pins[i]);
+    }
+    
+    // Phase 1: Rainbow wave with PWM fading - quick sweep left to right
+    for (uint8_t wave = 0; wave < 2; wave++) {
+        for (uint8_t pos = 0; pos < RGB_LIST_NUM + 4; pos++) {
+            // Clear previous LEDs
+            for (uint8_t j = 0; j < RGB_LIST_NUM; j++) {
+                nrf_gpio_pin_clear(led_pins[j]);
+            }
+            
+            // 4-LED trail with fading brightness
+            for (uint8_t t = 0; t < 4; t++) {
+                int8_t led_pos = pos - t;
+                if (led_pos >= 0 && led_pos < RGB_LIST_NUM) {
+                    uint8_t color_idx = rainbow_sequence[(pos + wave * 3) % RAINBOW_LEN];
+                    uint8_t brightness = 99 - (t * 25); // Fade trail
+                    
+                    set_pwm_color_brightness(&pwm_colors[color_idx], brightness);
+                    
+                    // Configure PWM for this LED
+                    pwm_config.output_pins[0] = led_pins[led_pos];
+                    pwm_config.output_pins[1] = NRF_DRV_PWM_PIN_NOT_USED;
+                    pwm_config.output_pins[2] = NRF_DRV_PWM_PIN_NOT_USED;
+                    pwm_config.output_pins[3] = NRF_DRV_PWM_PIN_NOT_USED;
+                    
+                    // Set color based on rainbow position
+                    set_slot_light_color(rainbow_sequence[color_idx] % 7);
+                    nrf_gpio_pin_set(led_pins[led_pos]);
+                }
+            }
+            bsp_delay_ms(30);
+        }
+    }
+    
+    // Phase 2: All LEDs flash rainbow colors
+    for (uint8_t c = 0; c < 6; c++) {
+        uint8_t color = rainbow_sequence[c * 2];
+        set_slot_light_color(color % 7);
+        for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
+            nrf_gpio_pin_set(led_pins[i]);
+        }
+        bsp_delay_ms(50);
+        for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
+            nrf_gpio_pin_clear(led_pins[i]);
+        }
+        bsp_delay_ms(25);
+    }
+    
+    // Phase 3: Converge to slot
+    set_slot_light_color(slot_color_to_enum(slot_color));
+    
+    // Light all, then turn off from edges toward slot
+    for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
+        nrf_gpio_pin_set(led_pins[i]);
+    }
+    bsp_delay_ms(100);
+    
+    for (uint8_t dist = 7; dist > 0; dist--) {
+        for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
+            uint8_t d = (i > slot) ? (i - slot) : (slot - i);
+            if (d >= dist) {
+                nrf_gpio_pin_clear(led_pins[i]);
+            }
+        }
+        bsp_delay_ms(40);
+    }
+    
+    // Final: only slot LED on
+    for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
+        if (i != slot) nrf_gpio_pin_clear(led_pins[i]);
+    }
+    nrf_gpio_pin_set(led_pins[slot]);
+}
+
+/**
+ * @brief Shutdown animation - fade out from slot
+ */
+void rgb_shutdown_animation(void) {
+    uint32_t *led_pins = hw_get_led_array();
+    uint8_t slot = tag_emulation_get_slot();
+    uint8_t slot_color = get_color_by_slot(slot);
+    
+    set_slot_light_color(slot_color_to_enum(slot_color));
+    
+    // Clear all first
+    for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
+        nrf_gpio_pin_clear(led_pins[i]);
+    }
+    
+    // Light slot LED
+    nrf_gpio_pin_set(led_pins[slot]);
+    bsp_delay_ms(100);
+    
+    // Expand from slot outward
+    for (uint8_t radius = 1; radius <= 7; radius++) {
+        for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
+            uint8_t d = (i > slot) ? (i - slot) : (slot - i);
+            if (d <= radius) {
+                nrf_gpio_pin_set(led_pins[i]);
+            }
+        }
+        bsp_delay_ms(35);
+    }
+    
+    bsp_delay_ms(150);
+    
+    // Contract back
+    for (uint8_t radius = 7; radius > 0; radius--) {
+        for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
+            uint8_t d = (i > slot) ? (i - slot) : (slot - i);
+            if (d >= radius) {
+                nrf_gpio_pin_clear(led_pins[i]);
+            }
+        }
+        bsp_delay_ms(30);
+    }
+    
+    // Fade slot LED using PWM
+    for (int8_t b = 99; b >= 0; b -= 5) {
+        set_pwm_color_brightness(&pwm_colors[slot_color], b);
+        bsp_delay_ms(20);
+    }
+    
+    // All off
+    for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
+        nrf_gpio_pin_clear(led_pins[i]);
+    }
+}
+
+/**
+ * @brief Flash slot indicator - uses existing slot
+ */
+void rgb_flash_slot_indicator(uint8_t slot, uint8_t color) {
+    uint32_t *led_pins = hw_get_led_array();
+    
+    set_slot_light_color(slot_color_to_enum(color));
+    
+    for (uint8_t i = 0; i < 3; i++) {
+        nrf_gpio_pin_set(led_pins[slot]);
+        bsp_delay_ms(100);
+        nrf_gpio_pin_clear(led_pins[slot]);
+        bsp_delay_ms(80);
+    }
+    nrf_gpio_pin_set(led_pins[slot]);
+}
+
+/**
+ * @brief Set slot info - now just a stub since we use existing functions
+ */
+void rgb_set_slot_info(uint8_t slot, uint8_t color) {
+    // Not needed - we use tag_emulation_get_slot() and get_color_by_slot()
+    (void)slot;
+    (void)color;
+}
+
+/**
+ * @brief Non-blocking idle animation with rainbow PWM colors
+ * Uses existing slot functions, always keeps slot LED lit
+ */
+bool rgb_idle_cycle_step(void) {
+    static uint32_t last_update = 0;
+    static uint8_t anim_pos = 0;
+    static uint8_t pattern = 0;
+    static uint16_t cycle_count = 0;
+    static uint8_t color_offset = 0;
+    
+    uint32_t now = app_timer_cnt_get();
+    
+    // 80ms update rate for smooth but visible animation
+    if (app_timer_cnt_diff_compute(now, last_update) < APP_TIMER_TICKS(80)) {
+        return false;
+    }
+    last_update = now;
+    
+    uint32_t *led_pins = hw_get_led_array();
+    uint8_t slot = tag_emulation_get_slot();
+    uint8_t slot_color = get_color_by_slot(slot);
+    
+    cycle_count++;
+    color_offset++;
+    
+    // Switch patterns every ~8 seconds
+    if (cycle_count >= 100) {
+        cycle_count = 0;
+        pattern = (pattern + 1) % 4;
+        anim_pos = 0;
+    }
+    
+    // ALWAYS clear all LEDs first
+    for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
+        nrf_gpio_pin_clear(led_pins[i]);
+    }
+    
+    // ALWAYS light slot LED in its assigned color
+    set_slot_light_color(slot_color_to_enum(slot_color));
+    nrf_gpio_pin_set(led_pins[slot]);
+    
+    if (pattern == 0) {
+        // Pattern 1: Rainbow chase bouncing
+        uint8_t head = anim_pos % (RGB_LIST_NUM * 2);
+        bool forward = head < RGB_LIST_NUM;
+        uint8_t pos = forward ? head : (RGB_LIST_NUM * 2 - 1 - head);
+        
+        for (uint8_t t = 0; t < 3; t++) {
+            int8_t led = forward ? (pos - t) : (pos + t);
+            if (led >= 0 && led < RGB_LIST_NUM && led != slot) {
+                uint8_t c = rainbow_sequence[(color_offset + t) % RAINBOW_LEN];
+                set_slot_light_color(c % 7);
+                nrf_gpio_pin_set(led_pins[led]);
+            }
+        }
+        anim_pos++;
+        
+    } else if (pattern == 1) {
+        // Pattern 2: Dual expanding rings from slot
+        uint8_t ring1 = (color_offset / 2) % 8;
+        uint8_t ring2 = (ring1 + 4) % 8;
+        
+        for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
+            if (i == slot) continue;
+            uint8_t d = (i > slot) ? (i - slot) : (slot - i);
+            if (d == ring1 || d == ring2) {
+                uint8_t c = rainbow_sequence[(d + color_offset / 3) % RAINBOW_LEN];
+                set_slot_light_color(c % 7);
+                nrf_gpio_pin_set(led_pins[i]);
+            }
+        }
+        
+    } else if (pattern == 2) {
+        // Pattern 3: Full rainbow - all LEDs different colors
+        for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
+            if (i == slot) continue;
+            uint8_t c = rainbow_sequence[(i + color_offset / 2) % RAINBOW_LEN];
+            set_slot_light_color(c % 7);
+            nrf_gpio_pin_set(led_pins[i]);
+        }
+        
+    } else {
+        // Pattern 4: Breathing - all LEDs same color, pulsing brightness
+        uint8_t breath = (color_offset % 40);
+        uint8_t brightness = breath < 20 ? (breath * 5) : ((40 - breath) * 5);
+        if (brightness < 20) brightness = 20; // Keep minimum visibility
+        
+        uint8_t c = rainbow_sequence[(color_offset / 40) % RAINBOW_LEN];
+        set_slot_light_color(c % 7);
+        
+        for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
+            if (i == slot) continue;
+            if (brightness > 50) {
+                nrf_gpio_pin_set(led_pins[i]);
+            }
+        }
+    }
+    
+    // Re-assert slot LED with correct color
+    set_slot_light_color(slot_color_to_enum(slot_color));
+    nrf_gpio_pin_set(led_pins[slot]);
+    
+    return true;
+}
+
+/**
+ * @brief Reset idle cycle and turn off all LEDs
+ */
+void rgb_idle_cycle_reset(void) {
+    uint32_t *led_pins = hw_get_led_array();
+    for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
+        nrf_gpio_pin_clear(led_pins[i]);
+    }
 }
