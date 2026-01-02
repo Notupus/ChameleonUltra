@@ -223,7 +223,7 @@ nxp_version_map = {
     (0x34, 0x21, 0x01, 0x01, 0x00, 0x0E, 0x03): "Mikron MIK640D (128 bytes)",
 }
 
-default_cwd = Path.cwd() / Path(__file__).with_name("bin")
+default_cwd = Path(__file__).resolve().parent / "bin"
 
 
 def load_key_file(import_key, keys):
@@ -241,7 +241,7 @@ def load_dic_file(import_dic, keys):
 
 
 def check_tools():
-    bin_dir = Path.cwd() / "bin"
+    bin_dir = Path(__file__).resolve().parent / "bin"
     missing_tools = []
 
     for tool in ("staticnested", "nested", "darkside", "mfkey32v2", "staticnested_1nt",
