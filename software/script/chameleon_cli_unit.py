@@ -1392,8 +1392,7 @@ class HF14AScan(ReaderRequiredUnit):
         print("- EMV Detection: Starting...")
         
         # State for T=CL session management
-        session_active = [False]
-        use_tcl_wrap = [False]  # Whether to use manual T=CL I-block wrapping
+        use_tcl_wrap = [None]  # None=unknown, True=use wrap, False=raw works
         block_number = [0]
         
         def wrap_apdu_tcl(apdu):
@@ -1406,98 +1405,86 @@ class HF14AScan(ReaderRequiredUnit):
             """Unwrap response - remove PCB byte if present"""
             if resp is None or len(resp) < 1:
                 return None
-            # Check if first byte looks like a PCB (I-block: 0x02 or 0x03)
             pcb = resp[0]
-            if pcb in [0x02, 0x03, 0x12, 0x13]:  # I-block PCB values
+            if pcb in [0x02, 0x03, 0x12, 0x13]:
                 return resp[1:] if len(resp) > 1 else None
             return resp
         
-        def send_apdu(apdu, timeout=300, label="APDU", new_session=False):
-            """Send APDU to card - handles both raw and T=CL modes"""
-            try:
-                # For new sessions, try raw APDU first (like Android NFC stack)
-                if new_session or not session_active[0]:
-                    block_number[0] = 0
-                    session_active[0] = False
-                    
-                    # First try: Raw APDU with auto_select (firmware handles T=CL)
-                    options = {
-                        'activate_rf_field': 1,
-                        'wait_response': 1,
-                        'append_crc': 1,
-                        'auto_select': 1,
-                        'keep_rf_field': 1,
-                        'check_response_crc': 1,
-                    }
-                    print(f"  # Sending {label}: {apdu.hex().upper()}")
-                    
-                    try:
-                        resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=apdu)
-                        if resp is not None and len(resp) >= 2:
-                            # Check if response looks valid (ends with 9000 or 6Xxx)
-                            if resp[-2] in [0x90, 0x61, 0x62, 0x63, 0x64, 0x65, 0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F]:
-                                print(f"  # Response: {resp.hex().upper()}")
-                                session_active[0] = True
-                                use_tcl_wrap[0] = False
-                                return resp
-                            # Check if response has PCB byte prefix
-                            unwrapped = unwrap_response(resp)
-                            if unwrapped and len(unwrapped) >= 2:
-                                if unwrapped[-2] in [0x90, 0x61, 0x62, 0x63, 0x64, 0x65, 0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F]:
-                                    print(f"  # Response (unwrapped): {unwrapped.hex().upper()}")
-                                    session_active[0] = True
-                                    use_tcl_wrap[0] = True
-                                    return unwrapped
-                    except Exception as e:
-                        print(f"  # Raw APDU error: {e}")
-                    
-                    # Second try: With explicit T=CL I-block wrapping
+        def is_valid_sw(resp):
+            """Check if response ends with valid status word"""
+            if resp is None or len(resp) < 2:
+                return False
+            return resp[-2] in [0x90, 0x61, 0x62, 0x63, 0x64, 0x65, 0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F]
+        
+        def send_apdu(apdu, timeout=300, label="APDU"):
+            """Send APDU to card - each call is a fresh session like Android NFC"""
+            # Reset block number for each new APDU exchange
+            block_number[0] = 0
+            
+            options = {
+                'activate_rf_field': 1,
+                'wait_response': 1,
+                'append_crc': 1,
+                'auto_select': 1,
+                'keep_rf_field': 1,
+                'check_response_crc': 1,
+            }
+            
+            print(f"  # Sending {label}: {apdu.hex().upper()}")
+            
+            # If we already know which mode works, use it
+            if use_tcl_wrap[0] == False:
+                try:
+                    resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=apdu)
+                    if resp is not None and is_valid_sw(resp):
+                        print(f"  # Response: {resp.hex().upper()}")
+                        return resp
+                except Exception as e:
+                    print(f"  # Error: {e}")
+            elif use_tcl_wrap[0] == True:
+                try:
                     wrapped = wrap_apdu_tcl(apdu)
-                    print(f"  # Retry with T=CL wrap: PCB={wrapped[0]:02X}")
-                    try:
-                        resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=wrapped)
-                        if resp is not None and len(resp) > 0:
-                            unwrapped = unwrap_response(resp)
-                            if unwrapped and len(unwrapped) >= 2:
-                                print(f"  # Response: {unwrapped.hex().upper()}")
-                                session_active[0] = True
-                                use_tcl_wrap[0] = True
-                                return unwrapped
-                    except Exception as e:
-                        print(f"  # T=CL APDU error: {e}")
-                    
-                    return None
-                
-                else:
-                    # Continue existing session
-                    options = {
-                        'activate_rf_field': 0,
-                        'wait_response': 1,
-                        'append_crc': 1,
-                        'auto_select': 0,
-                        'keep_rf_field': 1,
-                        'check_response_crc': 1,
-                    }
-                    
-                    data_to_send = wrap_apdu_tcl(apdu) if use_tcl_wrap[0] else apdu
-                    print(f"  # Sending {label}: {apdu.hex().upper()}")
-                    
-                    resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=data_to_send)
+                    resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=wrapped)
                     if resp is not None and len(resp) > 0:
-                        result = unwrap_response(resp) if use_tcl_wrap[0] else resp
-                        if result and len(result) >= 2:
-                            print(f"  # Response: {result.hex().upper()}")
-                            return result
-                    
-                    # Session might be lost, try new session
-                    print(f"  # No response, retrying with new session...")
-                    session_active[0] = False
-                    return send_apdu(apdu, timeout, label, new_session=True)
-                    
+                        unwrapped = unwrap_response(resp)
+                        if unwrapped and is_valid_sw(unwrapped):
+                            print(f"  # Response: {unwrapped.hex().upper()}")
+                            return unwrapped
+                except Exception as e:
+                    print(f"  # Error: {e}")
+            
+            # Try raw APDU first
+            try:
+                resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=apdu)
+                if resp is not None and is_valid_sw(resp):
+                    print(f"  # Response: {resp.hex().upper()}")
+                    use_tcl_wrap[0] = False
+                    return resp
+                # Check if response has PCB prefix
+                if resp is not None:
+                    unwrapped = unwrap_response(resp)
+                    if unwrapped and is_valid_sw(unwrapped):
+                        print(f"  # Response: {unwrapped.hex().upper()}")
+                        use_tcl_wrap[0] = True
+                        return unwrapped
             except Exception as e:
-                print(f"  # Error: {e}")
-                session_active[0] = False
-                return None
+                print(f"  # Raw APDU error: {e}")
+            
+            # Try with T=CL wrapping
+            try:
+                wrapped = wrap_apdu_tcl(apdu)
+                print(f"  # Retry with T=CL wrap: PCB={wrapped[0]:02X}")
+                resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=wrapped)
+                if resp is not None and len(resp) > 0:
+                    unwrapped = unwrap_response(resp)
+                    if unwrapped and is_valid_sw(unwrapped):
+                        print(f"  # Response: {unwrapped.hex().upper()}")
+                        use_tcl_wrap[0] = True
+                        return unwrapped
+            except Exception as e:
+                print(f"  # T=CL APDU error: {e}")
+            
+            return None
         
         # Known payment application AIDs
         payment_aids = {
@@ -1757,8 +1744,7 @@ class HF14AScan(ReaderRequiredUnit):
             ppse_name = bytes([0x32, 0x50, 0x41, 0x59, 0x2E, 0x53, 0x59, 0x53, 0x2E, 0x44, 0x44, 0x46, 0x30, 0x31])  # 2PAY.SYS.DDF01
             select_ppse = bytes([0x00, 0xA4, 0x04, 0x00, len(ppse_name)]) + ppse_name + bytes([0x00])
             
-            # Start new T=CL session for PPSE
-            resp = send_apdu(select_ppse, timeout=300, label="SELECT PPSE", new_session=True)
+            resp = send_apdu(select_ppse, timeout=300, label="SELECT PPSE")
             
             if resp is None or len(resp) < 2:
                 print("  # No valid response from PPSE selection")
@@ -1768,6 +1754,9 @@ class HF14AScan(ReaderRequiredUnit):
             sw1, sw2 = resp[-2], resp[-1]
             print(f"  # Status Word: {sw1:02X} {sw2:02X}")
             
+            ppse_app_label = None
+            ppse_network = None
+            
             if sw1 != 0x90 or sw2 != 0x00:
                 # Try direct AID selection instead
                 print("  # PPSE not found, trying direct AID selection...")
@@ -1775,7 +1764,7 @@ class HF14AScan(ReaderRequiredUnit):
                 # Try Visa
                 visa_aid = bytes.fromhex('A0000000031010')
                 select_visa = bytes([0x00, 0xA4, 0x04, 0x00, len(visa_aid)]) + visa_aid + bytes([0x00])
-                resp = send_apdu(select_visa, timeout=300, label="SELECT Visa", new_session=True)
+                resp = send_apdu(select_visa, timeout=300, label="SELECT Visa")
                 
                 if resp is not None and len(resp) >= 2:
                     sw1, sw2 = resp[-2], resp[-1]
@@ -1788,7 +1777,7 @@ class HF14AScan(ReaderRequiredUnit):
                     # Try Mastercard
                     mc_aid = bytes.fromhex('A0000000041010')
                     select_mc = bytes([0x00, 0xA4, 0x04, 0x00, len(mc_aid)]) + mc_aid + bytes([0x00])
-                    resp = send_apdu(select_mc, timeout=300, label="SELECT Mastercard", new_session=True)
+                    resp = send_apdu(select_mc, timeout=300, label="SELECT Mastercard")
                     
                     if resp is not None and len(resp) >= 2:
                         sw1, sw2 = resp[-2], resp[-1]
@@ -1801,7 +1790,7 @@ class HF14AScan(ReaderRequiredUnit):
                     print("  # No payment apps found")
                     return
             else:
-                # Parse PPSE response
+                # Parse PPSE response - extract info even if later selection fails
                 ppse_data = resp[:-2]
                 tlv = parse_tlv(ppse_data)
                 print(f"  # PPSE TLV tags: {[hex(k) for k in tlv.keys()]}")
@@ -1812,6 +1801,20 @@ class HF14AScan(ReaderRequiredUnit):
                     aid = tlv[0x4F].hex().upper()
                     found_apps.append(aid)
                     print(f"  # Found AID: {aid}")
+                    # Get network from PPSE
+                    if aid in payment_aids:
+                        ppse_network, _ = payment_aids[aid]
+                        card_info['network'] = ppse_network
+                        card_info['aid'] = aid
+                
+                # Get application label from PPSE (tag 50)
+                if 0x50 in tlv:
+                    try:
+                        ppse_app_label = tlv[0x50].decode('ascii', errors='ignore').strip()
+                        card_info['app_label'] = ppse_app_label
+                        print(f"  # App Label from PPSE: {ppse_app_label}")
+                    except Exception:
+                        pass
             
             # If we found AIDs from PPSE, try to select and read each app
             # Try found AID first, then other common AIDs
@@ -1820,21 +1823,18 @@ class HF14AScan(ReaderRequiredUnit):
                 if common_aid not in aids_to_try:
                     aids_to_try.append(common_aid)
             
+            aid_selected = False
             for aid_hex in aids_to_try:
-                if aid_hex in [c.get('aid') for c in [card_info] if 'aid' in c]:
-                    continue  # Already found this one
+                if aid_selected:
+                    break
                 try:
                     aid_bytes = bytes.fromhex(aid_hex)
                     select_aid = bytes([0x00, 0xA4, 0x04, 0x00, len(aid_bytes)]) + aid_bytes + bytes([0x00])
                     
-                    # Continue in same session if active, otherwise start new
                     resp = send_apdu(select_aid, timeout=300, label=f"SELECT AID {aid_hex}")
                     
                     if resp is None or len(resp) < 2:
-                        # Session may have been lost, try with new session
-                        resp = send_apdu(select_aid, timeout=300, label=f"SELECT AID {aid_hex} (retry)", new_session=True)
-                        if resp is None or len(resp) < 2:
-                            continue
+                        continue
                     
                     sw1, sw2 = resp[-2], resp[-1]
                     if not (sw1 == 0x90 and sw2 == 0x00):
@@ -1842,6 +1842,7 @@ class HF14AScan(ReaderRequiredUnit):
                         continue
                     
                     print(f"  # AID {aid_hex}: SUCCESS!")
+                    aid_selected = True
                     
                     # Parse FCI response
                     fci_data = resp[:-2]
@@ -2045,10 +2046,15 @@ class HF14AScan(ReaderRequiredUnit):
         
         # Clean up RF field
         try:
-            options['activate_rf_field'] = 0
-            options['wait_response'] = 0
-            options['keep_rf_field'] = 0
-            self.cmd.hf14a_raw(options=options, resp_timeout_ms=100, data=[])
+            cleanup_options = {
+                'activate_rf_field': 0,
+                'wait_response': 0,
+                'append_crc': 0,
+                'auto_select': 0,
+                'keep_rf_field': 0,
+                'check_response_crc': 0,
+            }
+            self.cmd.hf14a_raw(options=cleanup_options, resp_timeout_ms=100, data=bytes())
         except Exception:
             pass
 
