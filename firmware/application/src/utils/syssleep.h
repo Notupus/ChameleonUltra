@@ -9,7 +9,7 @@
 #define SLEEP_DELAY_MS_FIRST_POWER              1000    // The sleep delay of the first power supply (access to the battery)
 
 //           The operating state is delayed
-#define SLEEP_DELAY_MS_BUTTON_CLICK             4000    // The sleep delay of the button click
+#define SLEEP_DELAY_MS_BUTTON_CLICK             40000    // The sleep delay of the button click
 #define SLEEP_DELAY_MS_FIELD_NFC_LOST           20000    // High -frequency analog card after leaving the field
 #define SLEEP_DELAY_MS_FIELD_125KHZ_LOST        20000    // Sleep delay after leaving the field after leaving the field
 #define SLEEP_DELAY_MS_BLE_DISCONNECTED         10000    // BLE's sleep delay after disconnection
