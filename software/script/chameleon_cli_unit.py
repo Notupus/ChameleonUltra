@@ -1828,13 +1828,7 @@ class HF14AScan(ReaderRequiredUnit):
                             print(f"  # Card Brand: {bank}")
                 
                 if 'name' in card_info:
-                    # Partially mask the name for privacy
-                    name = card_info['name']
-                    if len(name) > 4:
-                        masked_name = name[:2] + '*' * (len(name) - 4) + name[-2:]
-                    else:
-                        masked_name = '*' * len(name)
-                    print(f"  # Cardholder: {masked_name}")
+                    print(f"  # Cardholder: {card_info['name']}")
                 
                 if 'expiry' in card_info:
                     print(f"  # Expires: {card_info['expiry']}")
