@@ -304,7 +304,13 @@ static void system_off_enter(void) {
         uint8_t animation_config = settings_get_animation_config();
         if (animation_config == SettingsAnimationModeFull) {
             uint8_t slot = tag_emulation_get_slot();
-            // Power off animation
+            uint8_t color = get_color_by_slot(slot);
+            // Update slot info for shutdown animation
+            rgb_set_slot_info(slot, color);
+            // Use new smooth shutdown animation
+            if (m_system_off_processing) rgb_shutdown_animation();
+        } else if (animation_config == SettingsAnimationModeMinimal) {
+            uint8_t slot = tag_emulation_get_slot();
             uint8_t dir = slot > 3 ? 1 : 0;
             uint8_t color = get_color_by_slot(slot);
             if (m_reset_source & (NRF_POWER_RESETREAS_NFC_MASK | NRF_POWER_RESETREAS_LPCOMP_MASK)) {
@@ -315,10 +321,6 @@ static void system_off_enter(void) {
                 }
             }
             if (m_system_off_processing) ledblink5(color, slot, dir ? 7 : 0);
-            if (m_system_off_processing) ledblink4(color, dir, 7, 99, 75);
-            if (m_system_off_processing) ledblink4(color, !dir, 7, 75, 50);
-            if (m_system_off_processing) ledblink4(color, dir, 7, 50, 25);
-            if (m_system_off_processing) ledblink4(color, !dir, 7, 25, 0);
         }
         rgb_marquee_stop();
         if (!m_system_off_processing) {
@@ -452,6 +454,9 @@ static void check_wakeup_src(void) {
     uint8_t slot = tag_emulation_get_slot();
     uint8_t dir = slot > 3 ? 1 : 0;
     uint8_t color = get_color_by_slot(slot);
+    
+    // Store slot info for all animations
+    rgb_set_slot_info(slot, color);
 
     if (m_reset_source & NRF_POWER_RESETREAS_OFF_MASK) {
         NRF_LOG_INFO("WakeUp from button");
@@ -462,18 +467,14 @@ static void check_wakeup_src(void) {
         if (animation_config == SettingsAnimationModeFull) {
             // Play rainbow bootup animation on button wake
             rgb_bootup_animation();
-            // Flash slot indicator
-            rgb_flash_slot_indicator(slot, color);
         } else if (animation_config == SettingsAnimationModeMinimal) {
             ledblink2(color, !dir, dir ? slot : 7 - slot);
         } else {
             set_slot_light_color(color);
         }
-        
-        // Store slot info for idle animation
-        rgb_set_slot_info(slot, color);
 
         // The indicator of the current card slot lights up at the end of the animation
+        set_slot_light_color(color);
         light_up_by_slot();
 
         // If no operation follows, wait for the timeout and then deep hibernate
@@ -974,14 +975,23 @@ int main(void) {
     check_wakeup_src();       // Detect wake-up source and decide BLE broadcast and subsequent hibernation action according to the wake-up source
     tag_mode_enter();         // Enter card emulation mode by default
 
-    // Play bootup animation and slot indicator (skip if woken by LF field)
-    if (!(m_gpregret_val & RESET_ON_LF_FIELD_EXISTS_Msk)) {
-        rgb_bootup_animation();
-        // Flash the current slot indicator to show active tag
+    // Play bootup animation and slot indicator (skip if woken by NFC/LF field)
+    bool field_wakeup = (m_reset_source & (NRF_POWER_RESETREAS_NFC_MASK | NRF_POWER_RESETREAS_LPCOMP_MASK)) ||
+                        (m_gpregret_val & RESET_ON_LF_FIELD_EXISTS_Msk);
+    if (!field_wakeup) {
+        // Set slot info first so animation can use it
         uint8_t slot = tag_emulation_get_slot();
         uint8_t color = get_color_by_slot(slot);
-        rgb_flash_slot_indicator(slot, color);
         rgb_set_slot_info(slot, color);
+        
+        // Only play full animation on button wakeup, not on first power
+        if (m_reset_source & NRF_POWER_RESETREAS_OFF_MASK) {
+            // Button wakeup - animation already played in check_wakeup_src
+        } else if (!(m_reset_source & NRF_POWER_RESETREAS_VBUS_MASK)) {
+            // First power or other - play animation
+            rgb_bootup_animation();
+        }
+        light_up_by_slot();
     }
 
     // usbd event listener

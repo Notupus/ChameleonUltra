@@ -515,76 +515,180 @@ void rgb_set_slot_info(uint8_t slot, uint8_t color) {
 }
 
 /**
- * @brief RGB bootup animation - trailing effect with smooth rainbow color transition
+ * @brief RGB bootup animation - rainbow spiral converging to slot with smooth transitions
+ * Ends by lighting up the current slot in its tag color
  */
 void rgb_bootup_animation(void) {
     uint32_t *led_pins = hw_get_led_array();
     uint8_t colors[] = {RGB_RED, RGB_YELLOW, RGB_GREEN, RGB_CYAN, RGB_BLUE, RGB_MAGENTA};
     uint8_t num_colors = sizeof(colors) / sizeof(colors[0]);
-    uint8_t trail_length = 3;  // Number of LEDs in the trail
-    uint8_t color_idx = 0;     // Current color index for smooth transition
-    uint8_t steps_per_color = 4; // Steps before transitioning to next color
-    uint8_t step_count = 0;
     
     // Clear all LEDs first
     for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
         nrf_gpio_pin_clear(led_pins[i]);
     }
     
-    // Trailing animation: circle around with smooth color changes
-    for (uint8_t loop = 0; loop < 2; loop++) {
-        // Forward direction with trailing effect and color cycling
-        for (uint8_t head = 0; head < RGB_LIST_NUM + trail_length; head++) {
-            // Smoothly cycle color every few steps
-            if (++step_count >= steps_per_color) {
-                step_count = 0;
-                color_idx = (color_idx + 1) % num_colors;
-            }
-            set_slot_light_color(colors[color_idx]);
-            
-            // Turn off all LEDs
+    // Phase 1: Rainbow wave expanding from center
+    for (uint8_t wave = 0; wave < 4; wave++) {
+        uint8_t color = colors[wave % num_colors];
+        set_slot_light_color(color);
+        
+        // Expand from center (positions 3,4) outward
+        for (uint8_t radius = 0; radius <= 4; radius++) {
+            // Clear all
             for (uint8_t j = 0; j < RGB_LIST_NUM; j++) {
                 nrf_gpio_pin_clear(led_pins[j]);
             }
             
-            // Light up trail LEDs (head and trailing positions)
-            for (uint8_t t = 0; t < trail_length; t++) {
+            // Light LEDs at this radius from center
+            int8_t center_left = 3;
+            int8_t center_right = 4;
+            for (uint8_t r = 0; r <= radius; r++) {
+                int8_t pos_left = center_left - r;
+                int8_t pos_right = center_right + r;
+                if (pos_left >= 0) nrf_gpio_pin_set(led_pins[pos_left]);
+                if (pos_right < RGB_LIST_NUM) nrf_gpio_pin_set(led_pins[pos_right]);
+            }
+            bsp_delay_ms(35);
+        }
+        
+        // Contract back to center
+        for (int8_t radius = 3; radius >= 0; radius--) {
+            for (uint8_t j = 0; j < RGB_LIST_NUM; j++) {
+                nrf_gpio_pin_clear(led_pins[j]);
+            }
+            
+            int8_t center_left = 3;
+            int8_t center_right = 4;
+            for (uint8_t r = 0; r <= radius; r++) {
+                int8_t pos_left = center_left - r;
+                int8_t pos_right = center_right + r;
+                if (pos_left >= 0) nrf_gpio_pin_set(led_pins[pos_left]);
+                if (pos_right < RGB_LIST_NUM) nrf_gpio_pin_set(led_pins[pos_right]);
+            }
+            bsp_delay_ms(35);
+        }
+    }
+    
+    // Phase 2: Chasing trail with color transition
+    uint8_t color_idx = 0;
+    for (uint8_t chase = 0; chase < 2; chase++) {
+        // Forward chase
+        for (uint8_t head = 0; head < RGB_LIST_NUM + 3; head++) {
+            color_idx = (head / 2) % num_colors;
+            set_slot_light_color(colors[color_idx]);
+            
+            for (uint8_t j = 0; j < RGB_LIST_NUM; j++) {
+                nrf_gpio_pin_clear(led_pins[j]);
+            }
+            
+            // 3-LED trail
+            for (uint8_t t = 0; t < 3; t++) {
                 int8_t pos = head - t;
                 if (pos >= 0 && pos < RGB_LIST_NUM) {
                     nrf_gpio_pin_set(led_pins[pos]);
                 }
             }
-            bsp_delay_ms(45);  // Slower animation
+            bsp_delay_ms(40);
         }
         
-        // Reverse direction with trailing effect and continued color cycling
-        for (int8_t head = RGB_LIST_NUM - 1; head >= -((int8_t)trail_length - 1); head--) {
-            // Smoothly cycle color every few steps
-            if (++step_count >= steps_per_color) {
-                step_count = 0;
-                color_idx = (color_idx + 1) % num_colors;
-            }
+        // Reverse chase
+        for (int8_t head = RGB_LIST_NUM - 1; head >= -2; head--) {
+            color_idx = ((RGB_LIST_NUM - head) / 2) % num_colors;
             set_slot_light_color(colors[color_idx]);
             
-            // Turn off all LEDs
             for (uint8_t j = 0; j < RGB_LIST_NUM; j++) {
                 nrf_gpio_pin_clear(led_pins[j]);
             }
             
-            // Light up trail LEDs
-            for (uint8_t t = 0; t < trail_length; t++) {
+            for (uint8_t t = 0; t < 3; t++) {
                 int8_t pos = head + t;
                 if (pos >= 0 && pos < RGB_LIST_NUM) {
                     nrf_gpio_pin_set(led_pins[pos]);
                 }
             }
-            bsp_delay_ms(45);  // Slower animation
+            bsp_delay_ms(40);
         }
     }
     
-    // Clear all LEDs at end
+    // Phase 3: Converge to the active slot with slot color
+    for (uint8_t j = 0; j < RGB_LIST_NUM; j++) {
+        nrf_gpio_pin_clear(led_pins[j]);
+    }
+    
+    set_slot_light_color(g_slot_color);
+    
+    // Light all LEDs then turn them off one by one toward the slot
+    for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
+        nrf_gpio_pin_set(led_pins[i]);
+    }
+    bsp_delay_ms(100);
+    
+    // Turn off LEDs from edges toward the slot
+    for (uint8_t dist = 7; dist > 0; dist--) {
+        for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
+            uint8_t d = (i > g_current_slot) ? (i - g_current_slot) : (g_current_slot - i);
+            if (d >= dist) {
+                nrf_gpio_pin_clear(led_pins[i]);
+            }
+        }
+        bsp_delay_ms(60);
+    }
+    
+    // Flash the slot LED
+    for (uint8_t i = 0; i < 2; i++) {
+        nrf_gpio_pin_clear(led_pins[g_current_slot]);
+        bsp_delay_ms(80);
+        nrf_gpio_pin_set(led_pins[g_current_slot]);
+        bsp_delay_ms(80);
+    }
+}
+
+/**
+ * @brief Shutdown animation - slot color expands then fades out
+ */
+void rgb_shutdown_animation(void) {
+    uint32_t *led_pins = hw_get_led_array();
+    
+    set_slot_light_color(g_slot_color);
+    
+    // Start with just slot LED
     for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
         nrf_gpio_pin_clear(led_pins[i]);
+    }
+    nrf_gpio_pin_set(led_pins[g_current_slot]);
+    bsp_delay_ms(100);
+    
+    // Expand from slot outward
+    for (uint8_t radius = 1; radius <= 7; radius++) {
+        for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
+            uint8_t d = (i > g_current_slot) ? (i - g_current_slot) : (g_current_slot - i);
+            if (d <= radius) {
+                nrf_gpio_pin_set(led_pins[i]);
+            }
+        }
+        bsp_delay_ms(50);
+    }
+    
+    bsp_delay_ms(150);
+    
+    // Contract and fade from edges
+    for (uint8_t radius = 7; radius > 0; radius--) {
+        for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
+            uint8_t d = (i > g_current_slot) ? (i - g_current_slot) : (g_current_slot - i);
+            if (d >= radius) {
+                nrf_gpio_pin_clear(led_pins[i]);
+            }
+        }
+        bsp_delay_ms(45);
+    }
+    
+    // Final flash of slot
+    for (uint8_t i = 0; i < 3; i++) {
+        nrf_gpio_pin_set(led_pins[g_current_slot]);
+        bsp_delay_ms(60);
+        nrf_gpio_pin_clear(led_pins[g_current_slot]);
+        bsp_delay_ms(60);
     }
 }
 
@@ -601,9 +705,9 @@ void rgb_flash_slot_indicator(uint8_t slot, uint8_t color) {
     // Flash 3 times
     for (uint8_t i = 0; i < 3; i++) {
         nrf_gpio_pin_set(led_pins[slot]);
-        bsp_delay_ms(150);
+        bsp_delay_ms(120);
         nrf_gpio_pin_clear(led_pins[slot]);
-        bsp_delay_ms(100);
+        bsp_delay_ms(80);
     }
     
     // Leave it on
@@ -611,7 +715,8 @@ void rgb_flash_slot_indicator(uint8_t slot, uint8_t color) {
 }
 
 /**
- * @brief Non-blocking idle cycling animation (call from main loop)
+ * @brief Non-blocking idle cycling animation - keeps slot LED visible
+ * Rainbow chaser that always keeps the slot LED lit in its color
  * @return true if animation step was performed
  */
 bool rgb_idle_cycle_step(void) {
@@ -619,11 +724,13 @@ bool rgb_idle_cycle_step(void) {
     static uint8_t cycle_pos = 0;
     static uint8_t cycle_color_idx = 0;
     static bool forward = true;
+    static uint8_t pattern_mode = 0;
+    static uint16_t pattern_counter = 0;
     
     uint32_t now = app_timer_cnt_get();
     
-    // Update every 80ms for a gentle cycle
-    if (app_timer_cnt_diff_compute(now, last_update) < APP_TIMER_TICKS(80)) {
+    // Update every 100ms for a gentle cycle
+    if (app_timer_cnt_diff_compute(now, last_update) < APP_TIMER_TICKS(100)) {
         return false;
     }
     last_update = now;
@@ -631,36 +738,84 @@ bool rgb_idle_cycle_step(void) {
     uint32_t *led_pins = hw_get_led_array();
     uint8_t colors[] = {RGB_RED, RGB_YELLOW, RGB_GREEN, RGB_CYAN, RGB_BLUE, RGB_MAGENTA};
     
-    // Clear all LEDs
+    pattern_counter++;
+    
+    // Switch pattern every ~8 seconds
+    if (pattern_counter >= 80) {
+        pattern_counter = 0;
+        pattern_mode = (pattern_mode + 1) % 3;
+        cycle_pos = 0;
+        forward = true;
+    }
+    
+    // Clear all LEDs except slot
     for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
         nrf_gpio_pin_clear(led_pins[i]);
     }
     
-    // Set color and light current position with trail
-    set_slot_light_color(colors[cycle_color_idx]);
-    
-    // Trail of 2 LEDs
-    for (int8_t t = 0; t < 2; t++) {
-        int8_t pos = forward ? (cycle_pos - t) : (cycle_pos + t);
-        if (pos >= 0 && pos < RGB_LIST_NUM) {
+    if (pattern_mode == 0) {
+        // Pattern 1: Single LED bouncing with slot always lit
+        set_slot_light_color(colors[cycle_color_idx]);
+        
+        // Always light the slot LED
+        nrf_gpio_pin_set(led_pins[g_current_slot]);
+        
+        // Bouncing LED (skip slot position)
+        uint8_t pos = cycle_pos;
+        if (pos != g_current_slot) {
             nrf_gpio_pin_set(led_pins[pos]);
         }
-    }
-    
-    // Update position
-    if (forward) {
-        cycle_pos++;
-        if (cycle_pos >= RGB_LIST_NUM + 1) {
-            forward = false;
-            cycle_pos = RGB_LIST_NUM - 1;
-            cycle_color_idx = (cycle_color_idx + 1) % 6;
+        
+        if (forward) {
+            cycle_pos++;
+            if (cycle_pos >= RGB_LIST_NUM) {
+                forward = false;
+                cycle_pos = RGB_LIST_NUM - 2;
+                cycle_color_idx = (cycle_color_idx + 1) % 6;
+            }
+        } else {
+            if (cycle_pos == 0) {
+                forward = true;
+                cycle_color_idx = (cycle_color_idx + 1) % 6;
+            } else {
+                cycle_pos--;
+            }
+        }
+    } else if (pattern_mode == 1) {
+        // Pattern 2: Breathing effect - all LEDs pulse with slot always on
+        static uint8_t breath_phase = 0;
+        breath_phase = (breath_phase + 1) % 16;
+        
+        set_slot_light_color(g_slot_color);
+        
+        // Slot always on
+        nrf_gpio_pin_set(led_pins[g_current_slot]);
+        
+        // Other LEDs on during bright phase
+        if (breath_phase < 8) {
+            for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
+                if (i != g_current_slot && (breath_phase >= 2 && breath_phase <= 5)) {
+                    nrf_gpio_pin_set(led_pins[i]);
+                }
+            }
         }
     } else {
-        if (cycle_pos == 0) {
-            forward = true;
-            cycle_color_idx = (cycle_color_idx + 1) % 6;
-        } else {
-            cycle_pos--;
+        // Pattern 3: Expanding rings from slot
+        static uint8_t ring_radius = 0;
+        ring_radius = (ring_radius + 1) % 10;
+        
+        set_slot_light_color(g_slot_color);
+        
+        // Slot always on
+        nrf_gpio_pin_set(led_pins[g_current_slot]);
+        
+        // Ring of LEDs at current radius
+        uint8_t r = ring_radius < 8 ? ring_radius : 0;
+        for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
+            uint8_t d = (i > g_current_slot) ? (i - g_current_slot) : (g_current_slot - i);
+            if (d == r && d > 0) {
+                nrf_gpio_pin_set(led_pins[i]);
+            }
         }
     }
     
@@ -671,7 +826,6 @@ bool rgb_idle_cycle_step(void) {
  * @brief Reset idle cycle state
  */
 void rgb_idle_cycle_reset(void) {
-    // Force reset by clearing static vars on next call
     uint32_t *led_pins = hw_get_led_array();
     for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
         nrf_gpio_pin_clear(led_pins[i]);

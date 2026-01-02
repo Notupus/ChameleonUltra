@@ -173,40 +173,51 @@ manufacturer_id_dict = {
 
 # Version-based tag identification (vendor, type, subtype, major, minor, size, proto) -> tag name
 nxp_version_map = {
-    # MIFARE Ultralight EV1
-    (0x04, 0x03, 0x01, 0x01, 0x00, 0x0B, 0x03): "MIFARE Ultralight EV1 (48 bytes)",
-    (0x04, 0x03, 0x01, 0x01, 0x00, 0x0E, 0x03): "MIFARE Ultralight EV1 (128 bytes)",
-    (0x04, 0x03, 0x02, 0x01, 0x00, 0x0B, 0x03): "MIFARE Ultralight EV1 (48 bytes)",
-    (0x04, 0x03, 0x02, 0x01, 0x00, 0x0E, 0x03): "MIFARE Ultralight EV1 (128 bytes)",
+    # MIFARE Ultralight EV1 - MF0UL11 (48 bytes user memory, 20 pages)
+    (0x04, 0x03, 0x01, 0x01, 0x00, 0x0B, 0x03): "MIFARE Ultralight EV1 MF0UL11 (48 bytes)",
+    # MIFARE Ultralight EV1 - MF0UL21 (128 bytes user memory, 41 pages)
+    (0x04, 0x03, 0x01, 0x01, 0x00, 0x0E, 0x03): "MIFARE Ultralight EV1 MF0UL21 (128 bytes)",
+    # Subtype 0x02 variants (common in production tags)
+    (0x04, 0x03, 0x02, 0x01, 0x00, 0x0B, 0x03): "MIFARE Ultralight EV1 MF0UL11 (48 bytes)",
+    (0x04, 0x03, 0x02, 0x01, 0x00, 0x0E, 0x03): "MIFARE Ultralight EV1 MF0UL21 (128 bytes)",
+    # Version 1.1 variants
+    (0x04, 0x03, 0x01, 0x01, 0x01, 0x0B, 0x03): "MIFARE Ultralight EV1 MF0UL11 (48 bytes)",
+    (0x04, 0x03, 0x01, 0x01, 0x01, 0x0E, 0x03): "MIFARE Ultralight EV1 MF0UL21 (128 bytes)",
+    (0x04, 0x03, 0x02, 0x01, 0x01, 0x0B, 0x03): "MIFARE Ultralight EV1 MF0UL11 (48 bytes)",
+    (0x04, 0x03, 0x02, 0x01, 0x01, 0x0E, 0x03): "MIFARE Ultralight EV1 MF0UL21 (128 bytes)",
     # MIFARE Ultralight Nano
     (0x04, 0x03, 0x02, 0x01, 0x00, 0x08, 0x03): "MIFARE Ultralight Nano (40 bytes)",
+    (0x04, 0x03, 0x01, 0x01, 0x00, 0x08, 0x03): "MIFARE Ultralight Nano (40 bytes)",
     # MIFARE Ultralight AES
-    (0x04, 0x03, 0x04, 0x01, 0x00, 0x0E, 0x03): "MIFARE Ultralight AES",
+    (0x04, 0x03, 0x04, 0x01, 0x00, 0x0E, 0x03): "MIFARE Ultralight AES (128 bytes)",
+    (0x04, 0x03, 0x04, 0x01, 0x00, 0x0B, 0x03): "MIFARE Ultralight AES (48 bytes)",
     # NTAG 210
-    (0x04, 0x04, 0x01, 0x01, 0x00, 0x0B, 0x03): "NTAG 210",
+    (0x04, 0x04, 0x01, 0x01, 0x00, 0x0B, 0x03): "NTAG 210 (48 bytes)",
+    # NTAG 210u
+    (0x04, 0x04, 0x01, 0x01, 0x00, 0x08, 0x03): "NTAG 210u (32 bytes)",
     # NTAG 212
-    (0x04, 0x04, 0x01, 0x01, 0x00, 0x0E, 0x03): "NTAG 212",
+    (0x04, 0x04, 0x01, 0x01, 0x00, 0x0E, 0x03): "NTAG 212 (128 bytes)",
     # NTAG 213
-    (0x04, 0x04, 0x02, 0x01, 0x00, 0x0F, 0x03): "NTAG 213",
-    (0x53, 0x04, 0x02, 0x01, 0x00, 0x0F, 0x03): "NTAG 213 (Shanghai Feiju)",  # Clone
+    (0x04, 0x04, 0x02, 0x01, 0x00, 0x0F, 0x03): "NTAG 213 (144 bytes)",
+    (0x53, 0x04, 0x02, 0x01, 0x00, 0x0F, 0x03): "NTAG 213 (Shanghai Feiju clone)",
     # NTAG 213F
-    (0x04, 0x04, 0x04, 0x01, 0x00, 0x0F, 0x03): "NTAG 213F",
+    (0x04, 0x04, 0x04, 0x01, 0x00, 0x0F, 0x03): "NTAG 213F (144 bytes)",
     # NTAG 213 TT
-    (0x04, 0x04, 0x02, 0x01, 0x01, 0x0F, 0x03): "NTAG 213 TT",
+    (0x04, 0x04, 0x02, 0x01, 0x01, 0x0F, 0x03): "NTAG 213 TT (144 bytes)",
     # NTAG 215
-    (0x04, 0x04, 0x02, 0x01, 0x00, 0x11, 0x03): "NTAG 215",
+    (0x04, 0x04, 0x02, 0x01, 0x00, 0x11, 0x03): "NTAG 215 (504 bytes)",
     # NTAG 216
-    (0x04, 0x04, 0x02, 0x01, 0x00, 0x13, 0x03): "NTAG 216",
+    (0x04, 0x04, 0x02, 0x01, 0x00, 0x13, 0x03): "NTAG 216 (888 bytes)",
     # NTAG 216F
-    (0x04, 0x04, 0x04, 0x01, 0x00, 0x13, 0x03): "NTAG 216F",
+    (0x04, 0x04, 0x04, 0x01, 0x00, 0x13, 0x03): "NTAG 216F (888 bytes)",
     # NTAG I2C 1K
-    (0x04, 0x04, 0x05, 0x02, 0x01, 0x13, 0x03): "NTAG I2C 1K",
+    (0x04, 0x04, 0x05, 0x02, 0x01, 0x13, 0x03): "NTAG I2C 1K (888 bytes)",
     # NTAG I2C 2K
-    (0x04, 0x04, 0x05, 0x02, 0x01, 0x15, 0x03): "NTAG I2C 2K",
+    (0x04, 0x04, 0x05, 0x02, 0x01, 0x15, 0x03): "NTAG I2C 2K (1912 bytes)",
     # NTAG I2C Plus 1K
-    (0x04, 0x04, 0x05, 0x02, 0x02, 0x13, 0x03): "NTAG I2C Plus 1K",
+    (0x04, 0x04, 0x05, 0x02, 0x02, 0x13, 0x03): "NTAG I2C Plus 1K (888 bytes)",
     # NTAG I2C Plus 2K
-    (0x04, 0x04, 0x05, 0x02, 0x02, 0x15, 0x03): "NTAG I2C Plus 2K",
+    (0x04, 0x04, 0x05, 0x02, 0x02, 0x15, 0x03): "NTAG I2C Plus 2K (1912 bytes)",
     # Mikron MIK640D (Ultralight EV1 compatible)
     (0x34, 0x21, 0x01, 0x01, 0x00, 0x0B, 0x03): "Mikron MIK640D (48 bytes)",
     (0x34, 0x21, 0x01, 0x01, 0x00, 0x0E, 0x03): "Mikron MIK640D (128 bytes)",
@@ -997,14 +1008,51 @@ class HF14AScan(ReaderRequiredUnit):
                     }
                     prod_name = prod_type_names.get(prod_type, f"Unknown (0x{prod_type:02X})")
                     
-                    # Calculate storage capacity
-                    storage_bytes = 2 ** (storage_size >> 1) if storage_size > 0 else 0
-                    if storage_size & 0x01:
-                        storage_bytes = storage_bytes + (storage_bytes // 2)
+                    # Storage size lookup table (storage byte -> user bytes)
+                    # Based on NXP documentation for various tag types
+                    storage_map = {
+                        0x06: 20,     # Ultralight (16 bytes user)
+                        0x08: 40,     # Ultralight Nano
+                        0x0A: 48,     # Ultralight (older)
+                        0x0B: 48,     # Ultralight EV1 (MF0UL11) - 48 bytes user
+                        0x0E: 128,    # Ultralight EV1 (MF0UL21) - 128 bytes user
+                        0x0F: 144,    # NTAG 213 - 144 bytes user
+                        0x11: 504,    # NTAG 215 - 504 bytes user
+                        0x12: 164,    # Ultralight variant
+                        0x13: 888,    # NTAG 216 - 888 bytes user
+                        0x15: 1912,   # NTAG I2C 2K
+                    }
+                    storage_bytes = storage_map.get(storage_size, 0)
                     
-                    print(f"  # Product Type: {prod_name}")
+                    # Build identification string
+                    if prod_type == 0x03:  # Ultralight family
+                        if storage_size == 0x0B:
+                            tag_name = "MIFARE Ultralight EV1 MF0UL11 (48 bytes)"
+                        elif storage_size == 0x0E:
+                            tag_name = "MIFARE Ultralight EV1 MF0UL21 (128 bytes)"
+                        elif storage_size == 0x08:
+                            tag_name = "MIFARE Ultralight Nano (40 bytes)"
+                        else:
+                            tag_name = f"{prod_name} variant (storage=0x{storage_size:02X})"
+                        print(f"  # Identified: {tag_name}")
+                    elif prod_type == 0x04:  # NTAG family
+                        if storage_size == 0x0F:
+                            tag_name = "NTAG 213 (144 bytes)"
+                        elif storage_size == 0x11:
+                            tag_name = "NTAG 215 (504 bytes)"
+                        elif storage_size == 0x13:
+                            tag_name = "NTAG 216 (888 bytes)"
+                        else:
+                            tag_name = f"NTAG variant (storage=0x{storage_size:02X})"
+                        print(f"  # Identified: {tag_name}")
+                    else:
+                        print(f"  # Product Type: {prod_name}")
+                        if storage_bytes > 0:
+                            print(f"  # Storage: {storage_bytes} bytes")
+                        else:
+                            print(f"  # Storage byte: 0x{storage_size:02X} (unknown)")
+                    
                     print(f"  # Version: {major_ver}.{minor_ver}")
-                    print(f"  # Storage: ~{storage_bytes} bytes")
         except Exception:
             pass  # Tag doesn't support GET_VERSION
         
