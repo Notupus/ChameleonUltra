@@ -1416,8 +1416,9 @@ class HF14AScan(ReaderRequiredUnit):
                 return False
             return resp[-2] in [0x90, 0x61, 0x62, 0x63, 0x64, 0x65, 0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F]
         
-        def send_apdu(apdu, timeout=300, label="APDU"):
-            """Send APDU to card - each call is a fresh session like Android NFC"""
+        def send_apdu(apdu, timeout=300, label="APDU", retries=2):
+            """Send APDU to card with retry logic for unreliable connections"""
+            import time
             
             options = {
                 'activate_rf_field': 1,
@@ -1430,60 +1431,71 @@ class HF14AScan(ReaderRequiredUnit):
             
             print(f"  # Sending {label}: {apdu.hex().upper()}")
             
-            # If we already know which mode works, try it first
-            if use_tcl_wrap[0] == False:
-                try:
-                    resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=apdu)
-                    if resp is not None and is_valid_sw(resp):
-                        print(f"  # Response: {resp.hex().upper()}")
-                        return resp
-                except Exception as e:
-                    print(f"  # Error: {e}")
-            elif use_tcl_wrap[0] == True:
-                try:
-                    # Always reset block number - each APDU is a fresh session with auto_select
-                    block_number[0] = 0
-                    wrapped = wrap_apdu_tcl(apdu)
-                    resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=wrapped)
-                    if resp is not None and len(resp) > 0:
-                        unwrapped = unwrap_response(resp)
-                        if unwrapped and is_valid_sw(unwrapped):
-                            print(f"  # Response: {unwrapped.hex().upper()}")
-                            return unwrapped
-                except Exception as e:
-                    print(f"  # Error: {e}")
-            
-            # Try raw APDU first
-            try:
-                resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=apdu)
-                if resp is not None and is_valid_sw(resp):
-                    print(f"  # Response: {resp.hex().upper()}")
-                    use_tcl_wrap[0] = False
-                    return resp
-                # Check if response has PCB prefix
-                if resp is not None:
-                    unwrapped = unwrap_response(resp)
-                    if unwrapped and is_valid_sw(unwrapped):
-                        print(f"  # Response: {unwrapped.hex().upper()}")
-                        use_tcl_wrap[0] = True
-                        return unwrapped
-            except Exception as e:
-                print(f"  # Raw APDU error: {e}")
-            
-            # Try with T=CL wrapping - reset block number for fresh start
-            try:
-                block_number[0] = 0
-                wrapped = wrap_apdu_tcl(apdu)
-                print(f"  # Retry with T=CL wrap: PCB={wrapped[0]:02X}")
-                resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=wrapped)
-                if resp is not None and len(resp) > 0:
-                    unwrapped = unwrap_response(resp)
-                    if unwrapped and is_valid_sw(unwrapped):
-                        print(f"  # Response: {unwrapped.hex().upper()}")
-                        use_tcl_wrap[0] = True
-                        return unwrapped
-            except Exception as e:
-                print(f"  # T=CL APDU error: {e}")
+            for attempt in range(retries + 1):
+                if attempt > 0:
+                    # Small delay between retries to let card settle
+                    time.sleep(0.05)
+                    print(f"  # Retry attempt {attempt}...")
+                
+                # If we already know which mode works, try it first
+                if use_tcl_wrap[0] == False:
+                    try:
+                        resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=apdu)
+                        if resp is not None and is_valid_sw(resp):
+                            print(f"  # Response: {resp.hex().upper()}")
+                            return resp
+                    except Exception as e:
+                        if attempt == retries:
+                            print(f"  # Error: {e}")
+                elif use_tcl_wrap[0] == True:
+                    try:
+                        # Always reset block number - each APDU is a fresh session with auto_select
+                        block_number[0] = 0
+                        wrapped = wrap_apdu_tcl(apdu)
+                        resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=wrapped)
+                        if resp is not None and len(resp) > 0:
+                            unwrapped = unwrap_response(resp)
+                            if unwrapped and is_valid_sw(unwrapped):
+                                print(f"  # Response: {unwrapped.hex().upper()}")
+                                return unwrapped
+                    except Exception as e:
+                        if attempt == retries:
+                            print(f"  # Error: {e}")
+                else:
+                    # Try raw APDU first
+                    try:
+                        resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=apdu)
+                        if resp is not None and is_valid_sw(resp):
+                            print(f"  # Response: {resp.hex().upper()}")
+                            use_tcl_wrap[0] = False
+                            return resp
+                        # Check if response has PCB prefix
+                        if resp is not None:
+                            unwrapped = unwrap_response(resp)
+                            if unwrapped and is_valid_sw(unwrapped):
+                                print(f"  # Response: {unwrapped.hex().upper()}")
+                                use_tcl_wrap[0] = True
+                                return unwrapped
+                    except Exception as e:
+                        if attempt == retries:
+                            print(f"  # Raw APDU error: {e}")
+                    
+                    # Try with T=CL wrapping - reset block number for fresh start
+                    try:
+                        block_number[0] = 0
+                        wrapped = wrap_apdu_tcl(apdu)
+                        if attempt == retries:
+                            print(f"  # Retry with T=CL wrap: PCB={wrapped[0]:02X}")
+                        resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=wrapped)
+                        if resp is not None and len(resp) > 0:
+                            unwrapped = unwrap_response(resp)
+                            if unwrapped and is_valid_sw(unwrapped):
+                                print(f"  # Response: {unwrapped.hex().upper()}")
+                                use_tcl_wrap[0] = True
+                                return unwrapped
+                    except Exception as e:
+                        if attempt == retries:
+                            print(f"  # T=CL APDU error: {e}")
             
             return None
         
@@ -1712,7 +1724,11 @@ class HF14AScan(ReaderRequiredUnit):
                         
             return result
         
-
+        def mask_pan(pan):
+            """Mask PAN for display - show first 4 and last 4 digits"""
+            if len(pan) <= 8:
+                return pan
+            return pan[:4] + '*' * (len(pan) - 8) + pan[-4:]
         
         def format_expiry(exp_bytes):
             """Format expiration date from YYMMDD"""
@@ -1916,7 +1932,7 @@ class HF14AScan(ReaderRequiredUnit):
                                             pan_bytes = rec_tlv[0x5A]
                                             pan = pan_bytes.hex().upper().rstrip('F')
                                             card_info['pan'] = pan
-                                            card_info['pan_masked'] = pan
+                                            card_info['pan_masked'] = mask_pan(pan)
                                         
                                         # Extract Track 2 (tag 57) - has PAN and expiry
                                         if 0x57 in rec_tlv:
