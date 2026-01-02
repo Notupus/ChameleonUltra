@@ -75,6 +75,7 @@
 
 #define DATA_CMD_HF14A_SET_FIELD_ON             (2100)
 #define DATA_CMD_HF14A_SET_FIELD_OFF            (2101)
+#define DATA_CMD_HF14A_EMV_READ                 (2102)
 
 //
 // ******************************************************************

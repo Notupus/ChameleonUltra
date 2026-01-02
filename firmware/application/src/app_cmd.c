@@ -515,6 +515,250 @@ static data_frame_tx_t *cmd_processor_hf14a_set_field_off(uint16_t cmd, uint16_t
     return data_frame_make(cmd, STATUS_SUCCESS, 0, NULL);
 }
 
+/**
+ * EMV card reader - performs complete EMV transaction in firmware
+ * Returns: AID (7 bytes) + app_label (16 bytes) + network_type (1 byte) + pan_len (1 byte) + pan (10 bytes) + exp (2 bytes)
+ */
+static data_frame_tx_t *cmd_processor_hf14a_emv_read(uint16_t cmd, uint16_t status, uint16_t length, uint8_t *data) {
+    // Response buffer - structured EMV data
+    // Format: [status:1][aid:7][app_label:16][network:1][pan_len:1][pan:10][exp_yy:1][exp_mm:1]
+    uint8_t resp[64] = {0};
+    uint16_t resp_len = 0;
+    
+    // APDU buffers
+    uint8_t apdu_buf[64];
+    uint8_t recv_buf[256];
+    uint16_t recv_len = 0;
+    
+    // Block number for ISO14443-4 I-blocks
+    uint8_t block_num = 0;
+    
+    // Known AIDs
+    static const uint8_t AID_MC[] = {0xA0, 0x00, 0x00, 0x00, 0x04, 0x10, 0x10};
+    static const uint8_t AID_VISA[] = {0xA0, 0x00, 0x00, 0x00, 0x03, 0x10, 0x10};
+    static const uint8_t PPSE[] = {0x32, 0x50, 0x41, 0x59, 0x2E, 0x53, 0x59, 0x53, 0x2E, 0x44, 0x44, 0x46, 0x30, 0x31};
+    
+    // Activate RF and select card
+    pcd_14a_reader_reset();
+    pcd_14a_reader_antenna_on();
+    bsp_delay_ms(10);
+    
+    picc_14a_tag_t tag;
+    status = pcd_14a_reader_scan_once(&tag);
+    if (status != STATUS_HF_TAG_OK) {
+        pcd_14a_reader_antenna_off();
+        return data_frame_make(cmd, STATUS_HF_TAG_NO, 0, NULL);
+    }
+    
+    // Helper macro to send APDU and handle response
+    #define SEND_APDU(apdu_data, apdu_len, timeout_ms) do { \
+        apdu_buf[0] = 0x02 | (block_num & 0x01); \
+        memcpy(&apdu_buf[1], apdu_data, apdu_len); \
+        crc_14a_append(apdu_buf, 1 + apdu_len); \
+        g_com_timeout_ms = timeout_ms; \
+        recv_len = 0; \
+        status = pcd_14a_reader_bytes_transfer(PCD_TRANSCEIVE, apdu_buf, 1 + apdu_len + 2, recv_buf, &recv_len, sizeof(recv_buf) * 8); \
+        if (status == STATUS_HF_TAG_OK && recv_len >= 8) { \
+            recv_len = recv_len / 8; \
+            /* Handle WTX */ \
+            uint8_t wtx_count = 0; \
+            while (wtx_count < 20 && recv_len >= 4 && recv_buf[0] == 0xF2) { \
+                wtx_count++; \
+                uint8_t wtx_resp[4] = {0xF2, recv_buf[1] & 0x3F, 0, 0}; \
+                crc_14a_append(wtx_resp, 2); \
+                g_com_timeout_ms = timeout_ms * 3; \
+                recv_len = 0; \
+                status = pcd_14a_reader_bytes_transfer(PCD_TRANSCEIVE, wtx_resp, 4, recv_buf, &recv_len, sizeof(recv_buf) * 8); \
+                if (status != STATUS_HF_TAG_OK) break; \
+                recv_len = recv_len / 8; \
+            } \
+            if (status == STATUS_HF_TAG_OK && recv_len >= 4) { \
+                /* Remove PCB, CRC */ \
+                recv_len -= 3; \
+                memmove(recv_buf, &recv_buf[1], recv_len); \
+                block_num = (block_num + 1) & 0x01; \
+            } else { \
+                recv_len = 0; \
+            } \
+        } else { \
+            recv_len = 0; \
+        } \
+    } while(0)
+    
+    // SELECT PPSE
+    uint8_t select_ppse[] = {0x00, 0xA4, 0x04, 0x00, 0x0E, 
+        0x32, 0x50, 0x41, 0x59, 0x2E, 0x53, 0x59, 0x53, 0x2E, 0x44, 0x44, 0x46, 0x30, 0x31, 0x00};
+    
+    SEND_APDU(select_ppse, sizeof(select_ppse), 500);
+    
+    if (recv_len < 2 || recv_buf[recv_len-2] != 0x90 || recv_buf[recv_len-1] != 0x00) {
+        pcd_14a_reader_antenna_off();
+        resp[0] = 1; // PPSE failed
+        return data_frame_make(cmd, STATUS_HF_TAG_OK, 1, resp);
+    }
+    
+    // Parse PPSE response - find AID (tag 4F)
+    uint8_t found_aid[7] = {0};
+    uint8_t found_aid_len = 0;
+    uint8_t network = 0; // 0=unknown, 1=Visa, 2=MC
+    uint8_t app_label[16] = {0};
+    
+    // Simple TLV search for tag 4F (AID)
+    for (uint16_t i = 0; i < recv_len - 2; i++) {
+        if (recv_buf[i] == 0x4F && i + 1 < recv_len) {
+            uint8_t aid_len = recv_buf[i + 1];
+            if (aid_len <= 7 && i + 2 + aid_len <= recv_len) {
+                found_aid_len = aid_len;
+                memcpy(found_aid, &recv_buf[i + 2], aid_len);
+                // Detect network
+                if (memcmp(found_aid, AID_VISA, 7) == 0) network = 1;
+                else if (memcmp(found_aid, AID_MC, 7) == 0) network = 2;
+                break;
+            }
+        }
+    }
+    
+    // Look for app label (tag 50)
+    for (uint16_t i = 0; i < recv_len - 2; i++) {
+        if (recv_buf[i] == 0x50 && i + 1 < recv_len) {
+            uint8_t label_len = recv_buf[i + 1];
+            if (label_len <= 16 && i + 2 + label_len <= recv_len) {
+                memcpy(app_label, &recv_buf[i + 2], label_len);
+                break;
+            }
+        }
+    }
+    
+    if (found_aid_len == 0) {
+        // Try Mastercard directly
+        memcpy(found_aid, AID_MC, 7);
+        found_aid_len = 7;
+        network = 2;
+    }
+    
+    // SELECT AID
+    uint8_t select_aid[14] = {0x00, 0xA4, 0x04, 0x00, found_aid_len};
+    memcpy(&select_aid[5], found_aid, found_aid_len);
+    select_aid[5 + found_aid_len] = 0x00;
+    
+    SEND_APDU(select_aid, 6 + found_aid_len, 1000);
+    
+    if (recv_len < 2 || recv_buf[recv_len-2] != 0x90 || recv_buf[recv_len-1] != 0x00) {
+        // Try Visa
+        memcpy(found_aid, AID_VISA, 7);
+        found_aid_len = 7;
+        network = 1;
+        memcpy(&select_aid[5], found_aid, found_aid_len);
+        block_num = 0; // Reset for new attempt
+        
+        SEND_APDU(select_aid, 6 + found_aid_len, 1000);
+        
+        if (recv_len < 2 || recv_buf[recv_len-2] != 0x90 || recv_buf[recv_len-1] != 0x00) {
+            pcd_14a_reader_antenna_off();
+            resp[0] = 2; // SELECT AID failed
+            memcpy(&resp[1], found_aid, 7);
+            memcpy(&resp[8], app_label, 16);
+            resp[24] = network;
+            return data_frame_make(cmd, STATUS_HF_TAG_OK, 25, resp);
+        }
+    }
+    
+    // Update app_label from SELECT response if present
+    for (uint16_t i = 0; i < recv_len - 2; i++) {
+        if (recv_buf[i] == 0x50 && i + 1 < recv_len) {
+            uint8_t label_len = recv_buf[i + 1];
+            if (label_len <= 16 && i + 2 + label_len <= recv_len) {
+                memset(app_label, 0, 16);
+                memcpy(app_label, &recv_buf[i + 2], label_len);
+                break;
+            }
+        }
+    }
+    
+    // GET PROCESSING OPTIONS (GPO)
+    uint8_t gpo[] = {0x80, 0xA8, 0x00, 0x00, 0x02, 0x83, 0x00, 0x00};
+    
+    SEND_APDU(gpo, sizeof(gpo), 1000);
+    
+    uint8_t pan[10] = {0};
+    uint8_t pan_len = 0;
+    uint8_t exp_yy = 0, exp_mm = 0;
+    
+    if (recv_len >= 2 && recv_buf[recv_len-2] == 0x90 && recv_buf[recv_len-1] == 0x00) {
+        // Parse AFL from GPO response (tag 94)
+        uint8_t afl[32] = {0};
+        uint8_t afl_len = 0;
+        
+        for (uint16_t i = 0; i < recv_len - 2; i++) {
+            if (recv_buf[i] == 0x94 && i + 1 < recv_len) {
+                afl_len = recv_buf[i + 1];
+                if (afl_len <= 32 && i + 2 + afl_len <= recv_len) {
+                    memcpy(afl, &recv_buf[i + 2], afl_len);
+                    break;
+                }
+            }
+        }
+        
+        // Read records based on AFL
+        for (uint8_t j = 0; j < afl_len && pan_len == 0; j += 4) {
+            uint8_t sfi = (afl[j] >> 3) & 0x1F;
+            uint8_t first_rec = afl[j + 1];
+            uint8_t last_rec = afl[j + 2];
+            
+            for (uint8_t rec = first_rec; rec <= last_rec && pan_len == 0; rec++) {
+                uint8_t read_rec[] = {0x00, 0xB2, rec, (sfi << 3) | 0x04, 0x00};
+                
+                SEND_APDU(read_rec, sizeof(read_rec), 500);
+                
+                if (recv_len >= 2 && recv_buf[recv_len-2] == 0x90) {
+                    // Look for Track 2 (tag 57) or PAN (tag 5A)
+                    for (uint16_t i = 0; i < recv_len - 2; i++) {
+                        if ((recv_buf[i] == 0x57 || recv_buf[i] == 0x5A) && i + 1 < recv_len) {
+                            uint8_t data_len = recv_buf[i + 1];
+                            if (data_len <= 10 && i + 2 + data_len <= recv_len) {
+                                pan_len = data_len;
+                                memcpy(pan, &recv_buf[i + 2], data_len);
+                                
+                                // For Track 2 (57), find expiry after 'D' separator
+                                if (recv_buf[i] == 0x57) {
+                                    for (uint8_t k = 0; k < data_len; k++) {
+                                        uint8_t nibble = (k & 1) ? (pan[k/2] & 0x0F) : (pan[k/2] >> 4);
+                                        if (nibble == 0x0D && k + 4 < data_len * 2) {
+                                            // Next 4 nibbles are YYMM
+                                            uint8_t yy_hi = ((k+1) & 1) ? (pan[(k+1)/2] & 0x0F) : (pan[(k+1)/2] >> 4);
+                                            uint8_t yy_lo = ((k+2) & 1) ? (pan[(k+2)/2] & 0x0F) : (pan[(k+2)/2] >> 4);
+                                            uint8_t mm_hi = ((k+3) & 1) ? (pan[(k+3)/2] & 0x0F) : (pan[(k+3)/2] >> 4);
+                                            uint8_t mm_lo = ((k+4) & 1) ? (pan[(k+4)/2] & 0x0F) : (pan[(k+4)/2] >> 4);
+                                            exp_yy = yy_hi * 10 + yy_lo;
+                                            exp_mm = mm_hi * 10 + mm_lo;
+                                            break;
+                                        }
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    pcd_14a_reader_antenna_off();
+    
+    // Build response
+    resp[0] = 0; // Success
+    memcpy(&resp[1], found_aid, 7);
+    memcpy(&resp[8], app_label, 16);
+    resp[24] = network;
+    resp[25] = pan_len;
+    memcpy(&resp[26], pan, 10);
+    resp[36] = exp_yy;
+    resp[37] = exp_mm;
+    
+    return data_frame_make(cmd, STATUS_HF_TAG_OK, 38, resp);
+}
+
 #endif
 
 static data_frame_tx_t *cmd_processor_hf14a_raw(uint16_t cmd, uint16_t status, uint16_t length, uint8_t *data) {
@@ -1609,6 +1853,7 @@ static cmd_data_map_t m_data_cmd_map[] = {
 
     {    DATA_CMD_HF14A_SET_FIELD_ON,           before_reader_run,           cmd_processor_hf14a_set_field_on,            NULL                   },
     {    DATA_CMD_HF14A_SET_FIELD_OFF,          before_reader_run,           cmd_processor_hf14a_set_field_off,           NULL                   },
+    {    DATA_CMD_HF14A_EMV_READ,               before_hf_reader_run,        cmd_processor_hf14a_emv_read,                NULL                   },
 
 #endif
 

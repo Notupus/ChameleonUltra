@@ -280,6 +280,43 @@ class ChameleonCMD:
         return resp
 
     @expect_response(Status.HF_TAG_OK)
+    def hf14a_emv_read(self):
+        """
+        Read EMV card data in firmware - faster and more reliable.
+        
+        Returns parsed dict with:
+            status: 0=success, 1=PPSE failed, 2=SELECT AID failed
+            aid: 7 bytes AID
+            app_label: Application label string
+            network: 0=unknown, 1=Visa, 2=Mastercard
+            pan: Card number (BCD encoded)
+            exp_yy: Expiry year
+            exp_mm: Expiry month
+        """
+        resp = self.device.send_cmd_sync(Command.HF14A_EMV_READ, timeout=5)
+        if resp.status == Status.HF_TAG_OK and len(resp.data) >= 38:
+            data = resp.data
+            result = {
+                'status': data[0],
+                'aid': data[1:8].hex().upper(),
+                'app_label': data[8:24].rstrip(b'\x00').decode('ascii', errors='ignore'),
+                'network': data[24],
+                'pan_len': data[25],
+                'pan_raw': data[26:36],
+                'exp_yy': data[36],
+                'exp_mm': data[37],
+            }
+            # Decode PAN from BCD
+            pan_hex = data[26:26+data[25]].hex().upper()
+            # Find 'D' separator and extract PAN
+            if 'D' in pan_hex:
+                result['pan'] = pan_hex.split('D')[0]
+            else:
+                result['pan'] = pan_hex.replace('F', '')
+            resp.parsed = result
+        return resp
+
+    @expect_response(Status.HF_TAG_OK)
     def mf1_manipulate_value_block(self, src_block, src_type: MfcKeyType, src_key, operator: MfcValueBlockOperator, operand, dst_block, dst_type: MfcKeyType, dst_key):
         """
         1. Increment: increments value from source block and write to dest block
