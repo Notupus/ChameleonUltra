@@ -1420,26 +1420,45 @@ class HF14AScan(ReaderRequiredUnit):
         
         def send_apdu_debug(apdu, options, timeout=300, label="APDU"):
             """Send APDU and show debug output"""
-            # Try without wrapping first (direct APDU)
-            print(f"  # Sending {label}: {apdu.hex().upper()}")
-            resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=apdu)
-            if resp is not None:
-                print(f"  # Response (direct): {resp.hex().upper()}")
-                return resp
-            
-            # Try with I-block wrapping
-            wrapped = wrap_apdu(apdu)
-            print(f"  # Sending {label} (T=CL): {wrapped.hex().upper()}")
-            resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=wrapped)
-            if resp is not None:
-                print(f"  # Response (T=CL): {resp.hex().upper()}")
-                unwrapped = unwrap_response(resp)
-                if unwrapped is not None:
-                    print(f"  # Unwrapped: {unwrapped.hex().upper()}")
-                return unwrapped
-            
-            print(f"  # No response")
-            return None
+            try:
+                # Try without wrapping first (direct APDU)
+                print(f"  # Sending {label}: {apdu.hex().upper()}")
+                try:
+                    resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=timeout, data=apdu)
+                    if resp is not None and len(resp) > 0:
+                        print(f"  # Response (direct): {resp.hex().upper()}")
+                        return resp
+                    else:
+                        print(f"  # No response (direct), trying T=CL...")
+                except Exception as e:
+                    print(f"  # Direct APDU error: {e}")
+                
+                # Need to re-select card for second attempt
+                options_copy = dict(options)
+                options_copy['activate_rf_field'] = 1
+                options_copy['auto_select'] = 1
+                
+                # Try with I-block wrapping
+                wrapped = wrap_apdu(apdu)
+                print(f"  # Sending {label} (T=CL): {wrapped.hex().upper()}")
+                try:
+                    resp = self.cmd.hf14a_raw(options=options_copy, resp_timeout_ms=timeout, data=wrapped)
+                    if resp is not None and len(resp) > 0:
+                        print(f"  # Response (T=CL): {resp.hex().upper()}")
+                        unwrapped = unwrap_response(resp)
+                        if unwrapped is not None:
+                            print(f"  # Unwrapped: {unwrapped.hex().upper()}")
+                        return unwrapped
+                    else:
+                        print(f"  # No response (T=CL)")
+                except Exception as e:
+                    print(f"  # T=CL APDU error: {e}")
+                
+                print(f"  # No valid response")
+                return None
+            except Exception as e:
+                print(f"  # send_apdu_debug exception: {e}")
+                return None
         
         # Known payment application AIDs
         payment_aids = {

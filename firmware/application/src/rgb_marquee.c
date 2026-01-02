@@ -530,7 +530,7 @@ void rgb_bootup_animation(void) {
         nrf_gpio_pin_clear(led_pins[i]);
     }
     
-    // Phase 1: Rainbow wave with PWM fading - quick sweep left to right
+    // Phase 1: Rainbow wave - quick sweep left to right
     for (uint8_t wave = 0; wave < 2; wave++) {
         for (uint8_t pos = 0; pos < RGB_LIST_NUM + 4; pos++) {
             // Clear previous LEDs
@@ -538,23 +538,13 @@ void rgb_bootup_animation(void) {
                 nrf_gpio_pin_clear(led_pins[j]);
             }
             
-            // 4-LED trail with fading brightness
+            // 4-LED trail with different colors
             for (uint8_t t = 0; t < 4; t++) {
                 int8_t led_pos = pos - t;
                 if (led_pos >= 0 && led_pos < RGB_LIST_NUM) {
-                    uint8_t color_idx = rainbow_sequence[(pos + wave * 3) % RAINBOW_LEN];
-                    uint8_t brightness = 99 - (t * 25); // Fade trail
-                    
-                    set_pwm_color_brightness(&pwm_colors[color_idx], brightness);
-                    
-                    // Configure PWM for this LED
-                    pwm_config.output_pins[0] = led_pins[led_pos];
-                    pwm_config.output_pins[1] = NRF_DRV_PWM_PIN_NOT_USED;
-                    pwm_config.output_pins[2] = NRF_DRV_PWM_PIN_NOT_USED;
-                    pwm_config.output_pins[3] = NRF_DRV_PWM_PIN_NOT_USED;
-                    
-                    // Set color based on rainbow position
-                    set_slot_light_color(rainbow_sequence[color_idx] % 7);
+                    // Cycle through R, G, B, Y, C, M
+                    uint8_t color = ((pos + wave * 2 + t) % 6);
+                    set_slot_light_color(color);
                     nrf_gpio_pin_set(led_pins[led_pos]);
                 }
             }
@@ -564,8 +554,7 @@ void rgb_bootup_animation(void) {
     
     // Phase 2: All LEDs flash rainbow colors
     for (uint8_t c = 0; c < 6; c++) {
-        uint8_t color = rainbow_sequence[c * 2];
-        set_slot_light_color(color % 7);
+        set_slot_light_color(c);
         for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
             nrf_gpio_pin_set(led_pins[i]);
         }
@@ -646,12 +635,21 @@ void rgb_shutdown_animation(void) {
     }
     
     // Fade slot LED using PWM
+    pwm_config.output_pins[0] = led_pins[slot];
+    pwm_config.output_pins[1] = NRF_DRV_PWM_PIN_NOT_USED;
+    pwm_config.output_pins[2] = NRF_DRV_PWM_PIN_NOT_USED;
+    pwm_config.output_pins[3] = NRF_DRV_PWM_PIN_NOT_USED;
+    
     for (int8_t b = 99; b >= 0; b -= 5) {
-        set_pwm_color_brightness(&pwm_colors[slot_color], b);
+        pwm_sequ_val.channel_0 = get_pwmduty(b);
+        nrfx_pwm_uninit(&pwm0_ins);
+        nrf_drv_pwm_init(&pwm0_ins, &pwm_config, NULL);
+        nrf_drv_pwm_simple_playback(&pwm0_ins, &seq, 1, NRF_DRV_PWM_FLAG_LOOP);
         bsp_delay_ms(20);
     }
     
     // All off
+    nrfx_pwm_uninit(&pwm0_ins);
     for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
         nrf_gpio_pin_clear(led_pins[i]);
     }
