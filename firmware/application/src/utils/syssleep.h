@@ -13,7 +13,7 @@
 #define SLEEP_DELAY_MS_FIELD_NFC_LOST           20000    // High -frequency analog card after leaving the field
 #define SLEEP_DELAY_MS_FIELD_125KHZ_LOST        20000    // Sleep delay after leaving the field after leaving the field
 #define SLEEP_DELAY_MS_BLE_DISCONNECTED         10000    // BLE's sleep delay after disconnection
-#define SLEEP_DELAY_MS_USB_POWER_DISCONNECTED   3000    // The sleep delay after the USB power supply is broken
+#define SLEEP_DELAY_MS_USB_POWER_DISCONNECTED   10000    // The sleep delay after the USB power supply is broken
 #define SLEEP_NO_BATTERY_SHUTDOWN               1       // Turn off at a low volume
 
 

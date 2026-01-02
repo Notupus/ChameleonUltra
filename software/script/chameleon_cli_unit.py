@@ -212,7 +212,21 @@ nxp_version_map = {
     (0x34, 0x21, 0x01, 0x01, 0x00, 0x0E, 0x03): "Mikron MIK640D (128 bytes)",
 }
 
-default_cwd = Path.cwd() / Path(__file__).with_name("bin")
+
+def _get_default_cwd():
+    """Get the bin directory - works for both normal and PyInstaller runs"""
+    if getattr(sys, 'frozen', False):
+        # Running as PyInstaller bundle
+        return Path(sys._MEIPASS) / "bin"
+    else:
+        # Running as script - try script dir first, then cwd
+        script_bin = Path(__file__).parent / "bin"
+        if script_bin.exists():
+            return script_bin
+        return Path.cwd() / "bin"
+
+
+default_cwd = _get_default_cwd()
 
 
 def load_key_file(import_key, keys):
@@ -230,7 +244,7 @@ def load_dic_file(import_dic, keys):
 
 
 def check_tools():
-    bin_dir = Path.cwd() / "bin"
+    bin_dir = default_cwd
     missing_tools = []
 
     for tool in ("staticnested", "nested", "darkside", "mfkey32v2", "staticnested_1nt",
@@ -974,37 +988,80 @@ class HF14AScan(ReaderRequiredUnit):
         try:
             # Send GET_VERSION command (0x60)
             version = self.cmd.hf14a_raw(options=options, resp_timeout_ms=100, data=struct.pack('!B', 0x60))
-            if version is not None and len(version) == 8:
+            if version is not None and len(version) >= 8:
                 print(f"- GET_VERSION: {version.hex().upper()}")
                 
-                vendor_id = version[0]
-                prod_type = version[1]
-                prod_subtype = version[2]
-                major_ver = version[3]
-                minor_ver = version[4]
-                storage_size = version[5]
-                protocol_type = version[6]
+                # Handle responses with or without leading header byte
+                # Some tags return: [header][vendor][type][subtype][major][minor][storage][protocol]
+                # Check if first byte is 0x00 (header) or 0x04 (NXP vendor)
+                offset = 0
+                if len(version) > 8 or (len(version) == 8 and version[0] == 0x00 and version[1] == 0x04):
+                    # Has leading header byte
+                    offset = 1 if version[0] == 0x00 else 0
                 
-                # Look up specific tag in version map
-                version_key = (vendor_id, prod_type, prod_subtype, major_ver, minor_ver, storage_size, protocol_type)
-                if version_key in nxp_version_map:
-                    print(f"  # Identified: {nxp_version_map[version_key]}")
-                else:
-                    # Generic identification based on product type
-                    prod_type_names = {
-                        0x03: "MIFARE Ultralight",
-                        0x04: "NTAG",
-                    }
-                    prod_name = prod_type_names.get(prod_type, f"Unknown (0x{prod_type:02X})")
+                # Ensure we have enough bytes after offset
+                if len(version) >= offset + 7:
+                    vendor_id = version[offset]
+                    prod_type = version[offset + 1]
+                    prod_subtype = version[offset + 2]
+                    major_ver = version[offset + 3]
+                    minor_ver = version[offset + 4]
+                    storage_size = version[offset + 5]
+                    protocol_type = version[offset + 6] if len(version) > offset + 6 else 0x03
                     
-                    # Calculate storage capacity
-                    storage_bytes = 2 ** (storage_size >> 1) if storage_size > 0 else 0
-                    if storage_size & 0x01:
-                        storage_bytes = storage_bytes + (storage_bytes // 2)
-                    
-                    print(f"  # Product Type: {prod_name}")
-                    print(f"  # Version: {major_ver}.{minor_ver}")
-                    print(f"  # Storage: ~{storage_bytes} bytes")
+                    # Look up specific tag in version map
+                    version_key = (vendor_id, prod_type, prod_subtype, major_ver, minor_ver, storage_size, protocol_type)
+                    if version_key in nxp_version_map:
+                        print(f"  # Identified: {nxp_version_map[version_key]}")
+                    else:
+                        # Generic identification based on product type
+                        prod_type_names = {
+                            0x01: "MIFARE Classic",
+                            0x02: "MIFARE Plus",
+                            0x03: "MIFARE Ultralight",
+                            0x04: "NTAG",
+                            0x21: "NTAG I2C",
+                        }
+                        prod_name = prod_type_names.get(prod_type, f"Unknown (0x{prod_type:02X})")
+                        
+                        # Calculate storage capacity based on storage size byte
+                        # Storage encoding: size = 2^(value/2), with LSB indicating +50%
+                        if storage_size == 0x06:
+                            storage_bytes = 48  # Ultralight EV1 48 bytes
+                        elif storage_size == 0x0B:
+                            storage_bytes = 48  # Ultralight EV1 48 bytes (alternate encoding)
+                        elif storage_size == 0x0E:
+                            storage_bytes = 128  # Ultralight EV1 128 bytes
+                        elif storage_size == 0x0F:
+                            storage_bytes = 144  # NTAG 213
+                        elif storage_size == 0x11:
+                            storage_bytes = 504  # NTAG 215
+                        elif storage_size == 0x13:
+                            storage_bytes = 888  # NTAG 216
+                        elif storage_size > 0:
+                            storage_bytes = 2 ** (storage_size >> 1)
+                            if storage_size & 0x01:
+                                storage_bytes = storage_bytes + (storage_bytes // 2)
+                        else:
+                            storage_bytes = 0
+                        
+                        # Adjust product name based on storage
+                        if prod_type == 0x03:  # MIFARE Ultralight
+                            if storage_bytes == 48:
+                                prod_name = "MIFARE Ultralight EV1 (48 bytes)"
+                            elif storage_bytes == 128:
+                                prod_name = "MIFARE Ultralight EV1 (128 bytes)"
+                        elif prod_type == 0x04:  # NTAG
+                            if storage_bytes <= 144:
+                                prod_name = "NTAG 213"
+                            elif storage_bytes <= 504:
+                                prod_name = "NTAG 215"
+                            elif storage_bytes <= 888:
+                                prod_name = "NTAG 216"
+                        
+                        print(f"  # Product Type: {prod_name}")
+                        print(f"  # Version: {major_ver}.{minor_ver}")
+                        print(f"  # Storage: ~{storage_bytes} bytes")
         except Exception:
             pass  # Tag doesn't support GET_VERSION
         
@@ -1026,6 +1083,294 @@ class HF14AScan(ReaderRequiredUnit):
             self.cmd.hf14a_raw(options=options, resp_timeout_ms=100, data=[])
         except Exception:
             pass
+
+    def get_iso14443_4_version_info(self, data_tag):
+        """Identify SAK 0x20 tags (DESFire, MIFARE Plus, NTAG 4xx) using native GET_VERSION"""
+        int_sak = data_tag['sak'][0]
+        ats = data_tag.get('ats', b'')
+        
+        # Only for ISO 14443-4 tags with SAK 0x20
+        if int_sak != 0x20:
+            return
+        
+        options = {
+            'activate_rf_field': 0,
+            'wait_response': 1,
+            'append_crc': 1,
+            'auto_select': 1,
+            'keep_rf_field': 1,
+            'check_response_crc': 1,
+        }
+        
+        # DESFire native GET_VERSION wrapped in ISO 7816-4: CLA=90, INS=60, P1=00, P2=00, Le=00
+        # Using I-block PCB byte 0x02
+        get_version_cmd = bytes([0x02, 0x90, 0x60, 0x00, 0x00, 0x00])
+        additional_frame = bytes([0x03, 0x90, 0xAF, 0x00, 0x00, 0x00])
+        
+        try:
+            # Send GET_VERSION part 1 (Hardware version info)
+            resp1 = self.cmd.hf14a_raw(options=options, resp_timeout_ms=200, data=get_version_cmd)
+            
+            if resp1 is not None and len(resp1) >= 9:
+                # Parse I-block response - skip PCB byte if present
+                offset = 1 if resp1[0] in (0x02, 0x03) else 0
+                
+                # Check status bytes at end: should be AF 91 (more data) or 00 91 (done)
+                # Response format: [PCB] [7 bytes version HW] [SW1=AF] [SW2=91]
+                sw1 = resp1[-2] if len(resp1) >= 2 else 0
+                sw2 = resp1[-1] if len(resp1) >= 1 else 0
+                
+                if sw2 == 0x91 and sw1 == 0xAF:
+                    # DESFire responded with "more data" - parse hardware version
+                    hw_vendor = resp1[offset]       # 0x04 = NXP
+                    hw_type = resp1[offset + 1]     # Product type
+                    hw_subtype = resp1[offset + 2]  # Product subtype
+                    hw_major = resp1[offset + 3]    # Major version
+                    hw_minor = resp1[offset + 4]    # Minor version
+                    hw_storage = resp1[offset + 5]  # Storage size
+                    hw_protocol = resp1[offset + 6] # Protocol type
+                    
+                    # Get software version (frame 2)
+                    options['keep_rf_field'] = 1
+                    resp2 = self.cmd.hf14a_raw(options=options, resp_timeout_ms=200, data=additional_frame)
+                    sw_major, sw_minor = 0, 0
+                    if resp2 is not None and len(resp2) >= 9:
+                        off2 = 1 if resp2[0] in (0x02, 0x03) else 0
+                        sw_major = resp2[off2 + 3]
+                        sw_minor = resp2[off2 + 4]
+                    
+                    # Get production info (frame 3) - toggle block number
+                    additional_frame2 = bytes([0x02, 0x90, 0xAF, 0x00, 0x00, 0x00])
+                    resp3 = self.cmd.hf14a_raw(options=options, resp_timeout_ms=200, data=additional_frame2)
+                    
+                    # Identify card based on product type (hw_type)
+                    # Based on NXP AN10833 and Proxmark3 source
+                    tag_name = "Unknown NXP Tag"
+                    product_category = ""
+                    
+                    if hw_type == 0x01:
+                        # MIFARE DESFire native IC
+                        product_category = "MIFARE DESFire"
+                        if hw_major == 0x00 and hw_minor == 0x01:
+                            tag_name = "DESFire MF3ICD40"
+                        elif hw_major == 0x01:
+                            tag_name = "DESFire EV1"
+                        elif hw_major == 0x12:
+                            tag_name = "DESFire EV2"
+                        elif hw_major == 0x22:
+                            tag_name = "DESFire EV2 XL"
+                        elif hw_major == 0x33:
+                            tag_name = "DESFire EV3"
+                        elif hw_major == 0x30:
+                            tag_name = "DESFire EV3"
+                        else:
+                            tag_name = f"DESFire (HW v{hw_major}.{hw_minor})"
+                            
+                    elif hw_type == 0x02:
+                        # MIFARE Plus
+                        product_category = "MIFARE Plus"
+                        if hw_major == 0x00:
+                            tag_name = "MIFARE Plus EV1"
+                        elif hw_major == 0x01:
+                            tag_name = "MIFARE Plus EV2"
+                        else:
+                            tag_name = f"MIFARE Plus (HW v{hw_major}.{hw_minor})"
+                            
+                    elif hw_type == 0x08:
+                        # DESFire Light
+                        product_category = "DESFire Light"
+                        tag_name = "DESFire Light"
+                        
+                    elif hw_type == 0x81 or hw_type == 0x83:
+                        # DESFire implementation on microcontroller
+                        product_category = "DESFire"
+                        tag_name = "DESFire on Microcontroller"
+                        
+                    elif hw_type == 0x91:
+                        # DESFire applet on Java card
+                        product_category = "DESFire"
+                        tag_name = "DESFire Applet (Java Card)"
+                        
+                    elif hw_type == 0xA1:
+                        # MIFARE DESFire HCE
+                        product_category = "DESFire"
+                        tag_name = "DESFire HCE (MIFARE 2GO)"
+                        
+                    elif hw_type == 0x04:
+                        # NTAG DNA family
+                        product_category = "NTAG DNA"
+                        if hw_subtype == 0x02:
+                            tag_name = "NTAG 413 DNA"
+                        elif hw_subtype == 0x05:
+                            tag_name = "NTAG 424 DNA"
+                        elif hw_subtype == 0x07:
+                            tag_name = "NTAG 424 DNA TT"
+                        else:
+                            tag_name = f"NTAG DNA (subtype 0x{hw_subtype:02X})"
+                    else:
+                        tag_name = f"Unknown NXP (type 0x{hw_type:02X})"
+                    
+                    # Calculate storage size
+                    if hw_storage == 0x16:
+                        storage_str = "2K"
+                    elif hw_storage == 0x18:
+                        storage_str = "4K"
+                    elif hw_storage == 0x1A:
+                        storage_str = "8K"
+                    elif hw_storage > 0:
+                        storage_bytes = 2 ** (hw_storage >> 1)
+                        if hw_storage & 0x01:
+                            storage_bytes += storage_bytes // 2
+                        storage_str = f"{storage_bytes // 1024}K" if storage_bytes >= 1024 else f"{storage_bytes} bytes"
+                    else:
+                        storage_str = "Unknown"
+                    
+                    print(f"- GET_VERSION HW: {resp1[offset:offset+7].hex().upper()}")
+                    print(f"  # Identified: {tag_name} ({storage_str})")
+                    print(f"  # HW Version: {hw_major}.{hw_minor}")
+                    print(f"  # SW Version: {sw_major}.{sw_minor}")
+                    
+                    # Clean up RF field
+                    try:
+                        options['activate_rf_field'] = 0
+                        options['wait_response'] = 0
+                        options['keep_rf_field'] = 0
+                        self.cmd.hf14a_raw(options=options, resp_timeout_ms=100, data=[])
+                    except Exception:
+                        pass
+                    return
+                    
+        except Exception as e:
+            pass
+        
+        # Clean up RF field
+        try:
+            options['activate_rf_field'] = 0
+            options['wait_response'] = 0
+            options['keep_rf_field'] = 0
+            self.cmd.hf14a_raw(options=options, resp_timeout_ms=100, data=[])
+        except Exception:
+            pass
+
+    def check_magic_mifare(self, data_tag):
+        """Detect magic MIFARE cards (Gen1a, Gen2/CUID, Gen3, Gen4/Ultimate)"""
+        int_sak = data_tag['sak'][0]
+        
+        # Only for MIFARE Classic SAK values
+        if int_sak not in (0x08, 0x09, 0x18, 0x88, 0x28, 0x38):
+            return
+        
+        options = {
+            'activate_rf_field': 1,
+            'wait_response': 1,
+            'append_crc': 0,
+            'auto_select': 0,
+            'keep_rf_field': 1,
+            'check_response_crc': 0,
+        }
+        
+        magic_type = None
+        
+        try:
+            # Test for Gen1a (responds to magic wakeup without CRC)
+            # Send: WUPA (0x52), then 0x40/0x43 backdoor sequence
+            wupa = self.cmd.hf14a_raw(options=options, resp_timeout_ms=50, data=bytes([0x52]))
+            if wupa is not None and len(wupa) >= 2:
+                # Try Gen1a backdoor: 0x40 (7 bits)
+                options['keep_rf_field'] = 1
+                options['activate_rf_field'] = 0
+                gen1a_cmd = self.cmd.hf14a_raw(options=options, resp_timeout_ms=50, 
+                                               data=bytes([0x40]), bit_len=7)
+                if gen1a_cmd is not None and len(gen1a_cmd) > 0:
+                    # Got response to backdoor command - likely Gen1a
+                    magic_type = "Gen1a (Chinese Magic Card)"
+        except Exception:
+            pass
+        
+        # Test for Gen4/Ultimate (GDM) - responds to special authentication
+        if magic_type is None:
+            try:
+                options['activate_rf_field'] = 0
+                options['auto_select'] = 1
+                options['append_crc'] = 1
+                options['check_response_crc'] = 1
+                
+                # Gen4 unlock command: CF + key (8 bytes) + command
+                # Default key: 00000000 or FFFFFFFF
+                gen4_unlock = bytes([0xCF, 0x00, 0x00, 0x00, 0x00, 0xC6])  # Get config
+                resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=100, data=gen4_unlock)
+                if resp is not None and len(resp) > 0 and resp[0] != 0x04:  # Not NAK
+                    magic_type = "Gen4 GTU (Ultimate Magic Card)"
+            except Exception:
+                pass
+        
+        # Clean up
+        try:
+            options['activate_rf_field'] = 0
+            options['wait_response'] = 0
+            options['keep_rf_field'] = 0
+            self.cmd.hf14a_raw(options=options, resp_timeout_ms=100, data=[])
+        except Exception:
+            pass
+        
+        if magic_type:
+            print(f"  # Magic Card: {magic_type}")
+
+    def identify_mifare_classic(self, data_tag):
+        """Identify MIFARE Classic variants based on SAK and ATQA"""
+        int_sak = data_tag['sak'][0]
+        atqa = int.from_bytes(data_tag['atqa'], byteorder='little')
+        uid = data_tag['uid']
+        
+        # MIFARE Classic identification based on SAK
+        classic_types = {
+            0x08: "MIFARE Classic 1K",
+            0x09: "MIFARE Mini",
+            0x18: "MIFARE Classic 4K",
+            0x88: "MIFARE Classic 1K (Infineon)",
+            0x28: "SmartMX with MIFARE Classic 1K",
+            0x38: "Nokia 6212/6131 MIFARE Classic 4K",
+        }
+        
+        if int_sak in classic_types:
+            tag_type = classic_types[int_sak]
+            
+            # Refine based on ATQA
+            if int_sak == 0x08:
+                if atqa == 0x0004:
+                    tag_type = "MIFARE Classic 1K (4-byte UID)"
+                elif atqa == 0x0044:
+                    tag_type = "MIFARE Classic 1K (7-byte UID)"
+                elif atqa == 0x0344:
+                    tag_type = "MIFARE Plus in SL1 (1K mode)"
+            elif int_sak == 0x09:
+                if atqa == 0x0044:
+                    tag_type = "MIFARE Mini (7-byte UID)"
+                else:
+                    tag_type = "MIFARE Mini (4-byte UID)"
+            elif int_sak == 0x18:
+                if atqa == 0x0002:
+                    tag_type = "MIFARE Classic 4K (4-byte UID)"
+                elif atqa == 0x0042:
+                    tag_type = "MIFARE Classic 4K (7-byte UID)"
+                elif atqa == 0x0344:
+                    tag_type = "MIFARE Plus in SL1 (4K mode)"
+            
+            # Check manufacturer
+            if len(uid) >= 1:
+                if uid[0] == 0x04:
+                    tag_type += " - NXP"
+                elif uid[0] == 0x05:
+                    tag_type += " - Infineon"
+                elif uid[0] == 0x57:
+                    tag_type += " - Fudan"
+                elif uid[0] == 0xAA:
+                    tag_type += " - Fudan FM11RF08S"
+                    
+            print(f"  # Identified: {tag_type}")
+            
+            # Check for magic card capabilities
+            self.check_magic_mifare(data_tag)
 
     def get_signature_info(self, data_tag):
         """Send READ_SIG command to get NXP originality signature"""
@@ -1070,6 +1415,8 @@ class HF14AScan(ReaderRequiredUnit):
                     # TODO: following checks cannot be done yet if multiple cards are present
                     if len(resp) == 1:
                         self.get_version_info(data_tag)
+                        self.get_iso14443_4_version_info(data_tag)
+                        self.identify_mifare_classic(data_tag)
                         self.get_signature_info(data_tag)
                         self.check_mf1_nt()
                         # TODO: check for ATS support on 14A3 tags
