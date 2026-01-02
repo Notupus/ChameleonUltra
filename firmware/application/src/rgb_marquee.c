@@ -518,10 +518,12 @@ static uint8_t slot_color_to_enum(uint8_t slot_color) {
 }
 
 /**
- * @brief RGB bootup animation - rainbow spiral converging to slot with PWM fading
+ * @brief RGB bootup animation - smooth rainbow spiral converging to slot
+ * Uses 256+ color smooth transitions with PWM on RGB pins
  */
 void rgb_bootup_animation(void) {
     uint32_t *led_pins = hw_get_led_array();
+    uint32_t *rgb_pins = hw_get_rgb_array();  // R, G, B control pins
     uint8_t slot = tag_emulation_get_slot();
     uint8_t slot_color = get_color_by_slot(slot);
     
@@ -530,61 +532,182 @@ void rgb_bootup_animation(void) {
         nrf_gpio_pin_clear(led_pins[i]);
     }
     
-    // Phase 1: Rainbow wave - quick sweep left to right
-    for (uint8_t wave = 0; wave < 2; wave++) {
-        for (uint8_t pos = 0; pos < RGB_LIST_NUM + 4; pos++) {
-            // Clear previous LEDs
-            for (uint8_t j = 0; j < RGB_LIST_NUM; j++) {
-                nrf_gpio_pin_clear(led_pins[j]);
-            }
-            
-            // 4-LED trail with different colors
-            for (uint8_t t = 0; t < 4; t++) {
-                int8_t led_pos = pos - t;
-                if (led_pos >= 0 && led_pos < RGB_LIST_NUM) {
-                    // Cycle through R, G, B, Y, C, M
-                    uint8_t color = ((pos + wave * 2 + t) % 6);
-                    set_slot_light_color(color);
-                    nrf_gpio_pin_set(led_pins[led_pos]);
-                }
-            }
-            bsp_delay_ms(30);
+    // Use PWM on RGB pins for smooth color transitions
+    // PWM instance 2 for RGB color mixing (instance 1 is used for LED brightness)
+    static nrf_drv_pwm_t pwm_rgb = NRF_DRV_PWM_INSTANCE(2);
+    static nrf_pwm_values_individual_t rgb_sequ_val;
+    static nrf_pwm_sequence_t rgb_seq = {
+        .values.p_individual = &rgb_sequ_val,
+        .length = 4,
+        .repeats = 0,
+        .end_delay = 0
+    };
+    nrf_drv_pwm_config_t rgb_pwm_config = {
+        .irq_priority = APP_IRQ_PRIORITY_LOWEST,
+        .base_clock = NRF_PWM_CLK_1MHz,
+        .count_mode = NRF_PWM_MODE_UP,
+        .top_value = PWM_MAX,
+        .load_mode = NRF_PWM_LOAD_INDIVIDUAL,
+        .step_mode = NRF_PWM_STEP_AUTO
+    };
+    
+    // Assign RGB pins to PWM channels (R=ch0, G=ch1, B=ch2, ch3 unused)
+    rgb_pwm_config.output_pins[0] = rgb_pins[0];  // Red
+    rgb_pwm_config.output_pins[1] = rgb_pins[1];  // Green
+    rgb_pwm_config.output_pins[2] = rgb_pins[2];  // Blue
+    rgb_pwm_config.output_pins[3] = NRF_DRV_PWM_PIN_NOT_USED;
+    
+    nrf_drv_pwm_init(&pwm_rgb, &rgb_pwm_config, NULL);
+    
+    // Phase 1: Smooth rainbow wave - 256 color steps across all LEDs
+    // Slower speed for smooth visual
+    for (uint16_t frame = 0; frame < 384; frame++) {  // 384 frames = ~4.6 sec at 12ms
+        // Calculate smooth rainbow color from frame (hue 0-255 mapped to RGB)
+        uint8_t hue = (frame * 2) % 256;  // Full rainbow twice
+        uint16_t r, g, b;
+        
+        // HSV to RGB conversion (S=255, V=255)
+        uint8_t region = hue / 43;
+        uint8_t remainder = (hue - (region * 43)) * 6;
+        
+        switch (region) {
+            case 0:
+                r = 255; g = remainder; b = 0;
+                break;
+            case 1:
+                r = 255 - remainder; g = 255; b = 0;
+                break;
+            case 2:
+                r = 0; g = 255; b = remainder;
+                break;
+            case 3:
+                r = 0; g = 255 - remainder; b = 255;
+                break;
+            case 4:
+                r = remainder; g = 0; b = 255;
+                break;
+            default:
+                r = 255; g = 0; b = 255 - remainder;
+                break;
         }
+        
+        // Invert for active-low PWM (0 = full bright, 1000 = off)
+        rgb_sequ_val.channel_0 = PWM_MAX - (r * PWM_MAX / 255);
+        rgb_sequ_val.channel_1 = PWM_MAX - (g * PWM_MAX / 255);
+        rgb_sequ_val.channel_2 = PWM_MAX - (b * PWM_MAX / 255);
+        rgb_sequ_val.channel_3 = PWM_MAX;
+        
+        nrf_drv_pwm_simple_playback(&pwm_rgb, &rgb_seq, 1, NRF_DRV_PWM_FLAG_LOOP);
+        
+        // Wave position across LEDs
+        int8_t wave_center = (frame / 8) % (RGB_LIST_NUM + 6) - 3;
+        
+        // Update which LEDs are lit (4-LED trail)
+        for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
+            int8_t dist = wave_center - i;
+            if (dist < 0) dist = -dist;
+            if (dist <= 3) {
+                nrf_gpio_pin_set(led_pins[i]);
+            } else {
+                nrf_gpio_pin_clear(led_pins[i]);
+            }
+        }
+        
+        bsp_delay_ms(12);  // Smooth 83Hz update rate
     }
     
-    // Phase 2: All LEDs flash rainbow colors
-    for (uint8_t c = 0; c < 6; c++) {
-        set_slot_light_color(c);
-        for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
-            nrf_gpio_pin_set(led_pins[i]);
-        }
-        bsp_delay_ms(50);
-        for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
-            nrf_gpio_pin_clear(led_pins[i]);
-        }
-        bsp_delay_ms(25);
-    }
-    
-    // Phase 3: Converge to slot
-    set_slot_light_color(slot_color_to_enum(slot_color));
-    
-    // Light all, then turn off from edges toward slot
+    // Phase 2: All LEDs on, smooth rainbow pulse (3 cycles)
     for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
         nrf_gpio_pin_set(led_pins[i]);
     }
-    bsp_delay_ms(100);
     
+    for (uint16_t frame = 0; frame < 192; frame++) {  // 192 frames = ~2.3 sec
+        uint8_t hue = (frame * 4) % 256;  // Faster rainbow
+        uint16_t r, g, b;
+        
+        uint8_t region = hue / 43;
+        uint8_t remainder = (hue - (region * 43)) * 6;
+        
+        switch (region) {
+            case 0: r = 255; g = remainder; b = 0; break;
+            case 1: r = 255 - remainder; g = 255; b = 0; break;
+            case 2: r = 0; g = 255; b = remainder; break;
+            case 3: r = 0; g = 255 - remainder; b = 255; break;
+            case 4: r = remainder; g = 0; b = 255; break;
+            default: r = 255; g = 0; b = 255 - remainder; break;
+        }
+        
+        rgb_sequ_val.channel_0 = PWM_MAX - (r * PWM_MAX / 255);
+        rgb_sequ_val.channel_1 = PWM_MAX - (g * PWM_MAX / 255);
+        rgb_sequ_val.channel_2 = PWM_MAX - (b * PWM_MAX / 255);
+        
+        nrf_drv_pwm_simple_playback(&pwm_rgb, &rgb_seq, 1, NRF_DRV_PWM_FLAG_LOOP);
+        bsp_delay_ms(12);
+    }
+    
+    // Phase 3: Smooth transition to slot color while converging LEDs
+    // Determine target RGB for slot color
+    uint16_t target_r = 0, target_g = 0, target_b = 0;
+    switch (slot_color) {
+        case 0: target_r = 255; break;                    // Red
+        case 1: target_g = 255; break;                    // Green  
+        case 2: target_b = 255; break;                    // Blue
+        default: target_g = 255; break;
+    }
+    
+    // Smooth converge: start with all LEDs, gradually turn off from edges
     for (uint8_t dist = 7; dist > 0; dist--) {
+        // Interpolate color toward slot color over 24 frames per distance
+        for (uint8_t f = 0; f < 24; f++) {
+            // Current position in overall fade (0-168)
+            uint16_t progress = (7 - dist) * 24 + f;
+            uint16_t total = 7 * 24;
+            
+            // Fade from current rainbow position to target
+            uint8_t hue = 192;  // Start near magenta
+            uint8_t region = hue / 43;
+            uint8_t remainder = (hue - (region * 43)) * 6;
+            uint16_t curr_r, curr_g, curr_b;
+            
+            switch (region) {
+                case 0: curr_r = 255; curr_g = remainder; curr_b = 0; break;
+                case 1: curr_r = 255 - remainder; curr_g = 255; curr_b = 0; break;
+                case 2: curr_r = 0; curr_g = 255; curr_b = remainder; break;
+                case 3: curr_r = 0; curr_g = 255 - remainder; curr_b = 255; break;
+                case 4: curr_r = remainder; curr_g = 0; curr_b = 255; break;
+                default: curr_r = 255; curr_g = 0; curr_b = 255 - remainder; break;
+            }
+            
+            // Linear interpolation to target
+            uint16_t r = curr_r + (int16_t)(target_r - curr_r) * progress / total;
+            uint16_t g = curr_g + (int16_t)(target_g - curr_g) * progress / total;
+            uint16_t b = curr_b + (int16_t)(target_b - curr_b) * progress / total;
+            
+            rgb_sequ_val.channel_0 = PWM_MAX - (r * PWM_MAX / 255);
+            rgb_sequ_val.channel_1 = PWM_MAX - (g * PWM_MAX / 255);
+            rgb_sequ_val.channel_2 = PWM_MAX - (b * PWM_MAX / 255);
+            
+            nrf_drv_pwm_simple_playback(&pwm_rgb, &rgb_seq, 1, NRF_DRV_PWM_FLAG_LOOP);
+            bsp_delay_ms(8);
+        }
+        
+        // Turn off LEDs at this distance from slot
         for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
             uint8_t d = (i > slot) ? (i - slot) : (slot - i);
             if (d >= dist) {
                 nrf_gpio_pin_clear(led_pins[i]);
             }
         }
-        bsp_delay_ms(40);
     }
     
-    // Final: only slot LED on
+    // Stop RGB PWM and switch to static color
+    nrfx_pwm_stop(&pwm_rgb, true);
+    nrfx_pwm_uninit(&pwm_rgb);
+    
+    // Set final slot color using standard function
+    set_slot_light_color(slot_color_to_enum(slot_color));
+    
+    // Final: only slot LED on with proper color
     for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
         if (i != slot) nrf_gpio_pin_clear(led_pins[i]);
     }
@@ -681,208 +804,160 @@ void rgb_set_slot_info(uint8_t slot, uint8_t color) {
     (void)color;
 }
 
+// Static PWM instance for RGB color control (separate from LED brightness PWM)
+static nrf_drv_pwm_t pwm_rgb_idle = NRF_DRV_PWM_INSTANCE(2);
+static nrf_pwm_values_individual_t rgb_idle_sequ_val;
+static nrf_pwm_sequence_t rgb_idle_seq = {
+    .values.p_individual = &rgb_idle_sequ_val,
+    .length = 4,
+    .repeats = 0,
+    .end_delay = 0
+};
+static uint8_t rgb_pwm_idle_initialized = 0;
+
 /**
- * @brief Non-blocking idle animation with smooth PWM rainbow colors
+ * @brief Non-blocking idle animation with smooth PWM 256-color rainbow
+ * Uses PWM on RGB color pins for smooth color transitions
  * Polls slot actively to keep slot LED always lit and stable
- * Uses PWM for smooth 256+ color gradients
  */
 bool rgb_idle_cycle_step(void) {
     static uint32_t last_update = 0;
-    static uint16_t hue = 0;           // 0-1535 for smooth rainbow (1536 colors!)
+    static uint16_t hue = 0;           // 0-255 for smooth 256-color rainbow
     static uint8_t heartbeat_phase = 0; // 0-99 for heartbeat timing
-    static uint8_t pwm_initialized = 0;
     
     uint32_t now = app_timer_cnt_get();
     
-    // 25ms update rate for smooth animation (40 FPS)
-    if (app_timer_cnt_diff_compute(now, last_update) < APP_TIMER_TICKS(25)) {
+    // 30ms update rate for smooth animation (~33 FPS)
+    if (app_timer_cnt_diff_compute(now, last_update) < APP_TIMER_TICKS(30)) {
         return false;
     }
     last_update = now;
     
     uint32_t *led_pins = hw_get_led_array();
+    uint32_t *rgb_pins = hw_get_rgb_array();
     
     // ACTIVELY POLL current slot - this ensures slot is always correct
     uint8_t slot = tag_emulation_get_slot();
     uint8_t slot_color = get_color_by_slot(slot);
     
-    // Advance rainbow hue (1536 total colors = 64 * 24)
-    hue = (hue + 3) % 1536;
+    // Advance rainbow hue (256 total colors) - slower for smoother visual
+    hue = (hue + 1) % 256;
     
     // Heartbeat phase advances
     heartbeat_phase = (heartbeat_phase + 1) % 100;
     
     // Calculate heartbeat brightness curve (double-beat like real heartbeat)
-    // Phase 0-15: first beat up, 16-25: first beat down
-    // Phase 26-35: second beat up, 36-50: second beat down  
-    // Phase 51-99: rest period
     uint16_t heartbeat_brightness;
     if (heartbeat_phase < 16) {
-        // First beat rise
-        heartbeat_brightness = heartbeat_phase * 62;  // 0 -> 992
+        heartbeat_brightness = heartbeat_phase * 62;
     } else if (heartbeat_phase < 26) {
-        // First beat fall
-        heartbeat_brightness = (26 - heartbeat_phase) * 99;  // 990 -> 0
+        heartbeat_brightness = (26 - heartbeat_phase) * 99;
     } else if (heartbeat_phase < 36) {
-        // Second beat rise (smaller)
-        heartbeat_brightness = (heartbeat_phase - 26) * 50;  // 0 -> 500
+        heartbeat_brightness = (heartbeat_phase - 26) * 50;
     } else if (heartbeat_phase < 51) {
-        // Second beat fall
-        heartbeat_brightness = (51 - heartbeat_phase) * 33;  // 495 -> 0
+        heartbeat_brightness = (51 - heartbeat_phase) * 33;
     } else {
-        // Rest period
         heartbeat_brightness = 0;
     }
     if (heartbeat_brightness > 1000) heartbeat_brightness = 1000;
     
-    // Convert hue (0-1535) to RGB values
-    // Each LED gets its own hue offset based on distance from slot
-    uint16_t sector = hue / 256;
-    uint16_t offset = hue % 256;
-    uint16_t base_r, base_g, base_b;
+    // Convert hue (0-255) to RGB using HSV->RGB (S=255, V=255)
+    uint8_t region = hue / 43;
+    uint8_t remainder = (hue - (region * 43)) * 6;
+    uint16_t r, g, b;
     
-    switch (sector) {
-        case 0:  // Red -> Yellow
-            base_r = 1000;
-            base_g = offset * 1000 / 255;
-            base_b = 0;
-            break;
-        case 1:  // Yellow -> Green
-            base_r = 1000 - (offset * 1000 / 255);
-            base_g = 1000;
-            base_b = 0;
-            break;
-        case 2:  // Green -> Cyan
-            base_r = 0;
-            base_g = 1000;
-            base_b = offset * 1000 / 255;
-            break;
-        case 3:  // Cyan -> Blue
-            base_r = 0;
-            base_g = 1000 - (offset * 1000 / 255);
-            base_b = 1000;
-            break;
-        case 4:  // Blue -> Magenta
-            base_r = offset * 1000 / 255;
-            base_g = 0;
-            base_b = 1000;
-            break;
-        default:  // Magenta -> Red
-            base_r = 1000;
-            base_g = 0;
-            base_b = 1000 - (offset * 1000 / 255);
-            break;
+    switch (region) {
+        case 0: r = 255; g = remainder; b = 0; break;
+        case 1: r = 255 - remainder; g = 255; b = 0; break;
+        case 2: r = 0; g = 255; b = remainder; break;
+        case 3: r = 0; g = 255 - remainder; b = 255; break;
+        case 4: r = remainder; g = 0; b = 255; break;
+        default: r = 255; g = 0; b = 255 - remainder; break;
     }
     
-    // Suppress unused variable warnings - RGB values calculated for future use
-    (void)base_r;
-    (void)base_g;
-    (void)base_b;
+    // Find LEDs in heartbeat zone (near slot)
+    uint8_t heartbeat_leds[4];
+    uint16_t led_brightness[4];
+    uint8_t heartbeat_count = 0;
     
-    // Find up to 4 LEDs closest to slot for PWM heartbeat effect
-    // LEDs further from slot get dimmer and different hue offset
-    uint8_t pwm_leds[4];
-    uint16_t pwm_brightness[4];
-    uint8_t pwm_count = 0;
-    
-    for (int8_t dist = 0; dist <= 3 && pwm_count < 4; dist++) {
-        // Check LED at slot - dist
-        if (dist == 0) {
-            // Slot LED handled separately
-            continue;
-        }
+    for (int8_t dist = 1; dist <= 3 && heartbeat_count < 4; dist++) {
         int8_t left = slot - dist;
         int8_t right = slot + dist;
         
-        if (left >= 0 && left < RGB_LIST_NUM && pwm_count < 4) {
-            pwm_leds[pwm_count] = left;
-            // Brightness decreases with distance, modulated by heartbeat
-            uint16_t dist_factor = 1000 - (dist * 250);  // 750, 500, 250
-            pwm_brightness[pwm_count] = (heartbeat_brightness * dist_factor) / 1000;
-            pwm_count++;
-        }
-        if (right < RGB_LIST_NUM && right != left && pwm_count < 4) {
-            pwm_leds[pwm_count] = right;
+        if (left >= 0 && left < RGB_LIST_NUM && heartbeat_count < 4) {
+            heartbeat_leds[heartbeat_count] = left;
             uint16_t dist_factor = 1000 - (dist * 250);
-            pwm_brightness[pwm_count] = (heartbeat_brightness * dist_factor) / 1000;
-            pwm_count++;
+            led_brightness[heartbeat_count] = (heartbeat_brightness * dist_factor) / 1000;
+            heartbeat_count++;
+        }
+        if (right < RGB_LIST_NUM && right != left && heartbeat_count < 4) {
+            heartbeat_leds[heartbeat_count] = right;
+            uint16_t dist_factor = 1000 - (dist * 250);
+            led_brightness[heartbeat_count] = (heartbeat_brightness * dist_factor) / 1000;
+            heartbeat_count++;
         }
     }
     
-    // Turn OFF LEDs not in the heartbeat zone
+    // Initialize RGB PWM if needed
+    if (!rgb_pwm_idle_initialized) {
+        nrf_drv_pwm_config_t rgb_config = {
+            .irq_priority = APP_IRQ_PRIORITY_LOWEST,
+            .base_clock = NRF_PWM_CLK_1MHz,
+            .count_mode = NRF_PWM_MODE_UP,
+            .top_value = PWM_MAX,
+            .load_mode = NRF_PWM_LOAD_INDIVIDUAL,
+            .step_mode = NRF_PWM_STEP_AUTO
+        };
+        rgb_config.output_pins[0] = rgb_pins[0];  // Red
+        rgb_config.output_pins[1] = rgb_pins[1];  // Green
+        rgb_config.output_pins[2] = rgb_pins[2];  // Blue
+        rgb_config.output_pins[3] = NRF_DRV_PWM_PIN_NOT_USED;
+        
+        nrf_drv_pwm_init(&pwm_rgb_idle, &rgb_config, NULL);
+        rgb_pwm_idle_initialized = 1;
+    }
+    
+    // Scale RGB by heartbeat brightness for the glow effect
+    uint16_t glow_r = (r * heartbeat_brightness) / 1000;
+    uint16_t glow_g = (g * heartbeat_brightness) / 1000;
+    uint16_t glow_b = (b * heartbeat_brightness) / 1000;
+    
+    // Invert for active-low PWM (0 = full on, 1000 = off)
+    rgb_idle_sequ_val.channel_0 = PWM_MAX - (glow_r * PWM_MAX / 255);
+    rgb_idle_sequ_val.channel_1 = PWM_MAX - (glow_g * PWM_MAX / 255);
+    rgb_idle_sequ_val.channel_2 = PWM_MAX - (glow_b * PWM_MAX / 255);
+    rgb_idle_sequ_val.channel_3 = PWM_MAX;
+    
+    nrf_drv_pwm_simple_playback(&pwm_rgb_idle, &rgb_idle_seq, 1, NRF_DRV_PWM_FLAG_LOOP);
+    
+    // Update LED positions - slot always on, heartbeat LEDs pulsing
     for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
-        if (i == slot) continue;
-        uint8_t in_zone = 0;
-        for (uint8_t j = 0; j < pwm_count; j++) {
-            if (pwm_leds[j] == i) {
-                in_zone = 1;
-                break;
+        if (i == slot) {
+            // Slot LED always on with stable brightness
+            nrf_gpio_pin_set(led_pins[i]);
+        } else {
+            // Check if in heartbeat zone
+            uint8_t in_zone = 0;
+            for (uint8_t j = 0; j < heartbeat_count; j++) {
+                if (heartbeat_leds[j] == i && led_brightness[j] > 100) {
+                    in_zone = 1;
+                    break;
+                }
             }
-        }
-        if (!in_zone) {
-            nrf_gpio_pin_clear(led_pins[i]);
+            if (in_zone) {
+                nrf_gpio_pin_set(led_pins[i]);
+            } else {
+                nrf_gpio_pin_clear(led_pins[i]);
+            }
         }
     }
     
-    // Set slot LED with its assigned color - always ON and stable
-    set_slot_light_color(slot_color_to_enum(slot_color));
-    nrf_gpio_pin_set(led_pins[slot]);
-    
-    // Configure PWM for heartbeat LEDs (up to 4 channels)
-    // Apply rainbow color with brightness based on distance and heartbeat
-    if (pwm_count > 0) {
-        // Calculate per-LED colors with hue offset based on position
-        for (uint8_t i = 0; i < 4; i++) {
-            if (i < pwm_count) {
-                uint16_t led_brightness = pwm_brightness[i];
-                // Invert for PWM (0 = full on, 1000 = off)
-                uint16_t pwm_val = 1000 - led_brightness;
-                
-                // Apply color with brightness
-                // For simplicity, use the base color scaled by brightness
-                pwm_config.output_pins[i] = led_pins[pwm_leds[i]];
-                
-                // We only have 4 PWM channels, so we use brightness only
-                // The color comes from set_slot_light_color which affects all LEDs
-                switch (i) {
-                    case 0: pwm_sequ_val.channel_0 = pwm_val; break;
-                    case 1: pwm_sequ_val.channel_1 = pwm_val; break;
-                    case 2: pwm_sequ_val.channel_2 = pwm_val; break;
-                    case 3: pwm_sequ_val.channel_3 = pwm_val; break;
-                }
-            } else {
-                pwm_config.output_pins[i] = NRF_DRV_PWM_PIN_NOT_USED;
-                switch (i) {
-                    case 0: pwm_sequ_val.channel_0 = 1000; break;
-                    case 1: pwm_sequ_val.channel_1 = 1000; break;
-                    case 2: pwm_sequ_val.channel_2 = 1000; break;
-                    case 3: pwm_sequ_val.channel_3 = 1000; break;
-                }
-            }
-        }
-        
-        // Set the color for heartbeat based on rainbow hue
-        // Map rainbow to slot color selection for smooth transitions
-        uint8_t rainbow_color;
-        if (hue < 512) {
-            rainbow_color = 0;  // Red
-        } else if (hue < 1024) {
-            rainbow_color = 1;  // Green
-        } else {
-            rainbow_color = 2;  // Blue
-        }
-        set_slot_light_color(slot_color_to_enum(rainbow_color));
-        
-        // Reinit PWM with new config
-        if (pwm_initialized) {
-            nrfx_pwm_uninit(&pwm0_ins);
-        }
-        nrf_drv_pwm_init(&pwm0_ins, &pwm_config, NULL);
-        nrf_drv_pwm_simple_playback(&pwm0_ins, &seq, 1, NRF_DRV_PWM_FLAG_LOOP);
-        pwm_initialized = 1;
-        
-        // Re-assert slot color after changing for heartbeat
+    // Override color for slot LED to use slot's assigned color (not rainbow)
+    // This requires briefly switching colors - do it during heartbeat low phase
+    if (heartbeat_brightness < 50) {
+        nrfx_pwm_stop(&pwm_rgb_idle, true);
         set_slot_light_color(slot_color_to_enum(slot_color));
+        nrf_gpio_pin_set(led_pins[slot]);
     }
     
     return true;
@@ -894,6 +969,11 @@ bool rgb_idle_cycle_step(void) {
 void rgb_idle_cycle_reset(void) {
     nrfx_pwm_stop(&pwm0_ins, true);
     nrfx_pwm_uninit(&pwm0_ins);
+    if (rgb_pwm_idle_initialized) {
+        nrfx_pwm_stop(&pwm_rgb_idle, true);
+        nrfx_pwm_uninit(&pwm_rgb_idle);
+        rgb_pwm_idle_initialized = 0;
+    }
     uint32_t *led_pins = hw_get_led_array();
     for (uint8_t i = 0; i < RGB_LIST_NUM; i++) {
         nrf_gpio_pin_clear(led_pins[i]);
