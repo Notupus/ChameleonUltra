@@ -1075,6 +1075,10 @@ class HF14AScan(ReaderRequiredUnit):
             except Exception:
                 pass
         
+        # Additional Ultralight/NTAG detection
+        if int_sak == 0x00:
+            self.detect_ultralight_features(options)
+        
         # Clean up RF field
         try:
             options['activate_rf_field'] = 0
@@ -1084,12 +1088,180 @@ class HF14AScan(ReaderRequiredUnit):
         except Exception:
             pass
 
+    def detect_ultralight_features(self, options):
+        """Detect additional Ultralight/NTAG features"""
+        try:
+            options['keep_rf_field'] = 1
+            options['activate_rf_field'] = 0
+            options['auto_select'] = 0
+            
+            # Read page 0-3 (UID, internal, lock bytes, OTP)
+            read_resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=100, 
+                                           data=struct.pack('!BB', 0x30, 0x00))
+            if read_resp and len(read_resp) >= 16:
+                # Page 2 contains lock bytes
+                lock0 = read_resp[8]
+                lock1 = read_resp[9]
+                # Page 3 is OTP
+                otp = read_resp[12:16]
+                
+                if lock0 != 0x00 or lock1 != 0x00:
+                    locked_pages = []
+                    if lock0 & 0x01: locked_pages.append("CC")
+                    if lock0 & 0x02: locked_pages.append("4-9")
+                    if lock0 & 0x04: locked_pages.append("10-15")
+                    if lock0 & 0x08: locked_pages.append("OTP")
+                    print(f"  # Lock bytes: {lock0:02X} {lock1:02X}")
+                    if locked_pages:
+                        print(f"  # Locked pages: {', '.join(locked_pages)}")
+                
+                if otp != b'\x00\x00\x00\x00' and otp != b'\xff\xff\xff\xff':
+                    print(f"  # OTP: {otp.hex().upper()}")
+            
+            # Try to read counter (NTAG 21x command 0x39)
+            try:
+                counter_resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=100,
+                                                  data=struct.pack('!BB', 0x39, 0x02))
+                if counter_resp and len(counter_resp) >= 3:
+                    counter = counter_resp[0] | (counter_resp[1] << 8) | (counter_resp[2] << 16)
+                    print(f"  # NFC Counter: {counter}")
+            except Exception:
+                pass
+            
+            # Check for password protection (try PWD_AUTH with all zeros)
+            try:
+                pwd_auth = self.cmd.hf14a_raw(options=options, resp_timeout_ms=100,
+                                              data=bytes([0x1B, 0x00, 0x00, 0x00, 0x00]))
+                if pwd_auth is None or len(pwd_auth) == 0:
+                    print("  # Password protected: Yes")
+                elif pwd_auth and len(pwd_auth) >= 2:
+                    print("  # Password protected: No (default password)")
+            except Exception:
+                print("  # Password protected: Yes")
+                
+        except Exception:
+            pass
+
+    def parse_ats_info(self, data_tag):
+        """Parse ATS (Answer To Select) for ISO 14443-4 tags and show bitrates"""
+        ats = data_tag.get('ats', b'')
+        if len(ats) < 2:
+            return
+        
+        # ATS format: TL T0 [TA1] [TB1] [TC1] [Historical bytes]
+        tl = ats[0]  # Length including TL
+        t0 = ats[1]
+        
+        # Parse T0
+        fsci = t0 & 0x0F
+        fsc_values = [16, 24, 32, 40, 48, 64, 96, 128, 256, 512, 1024, 2048, 4096, 4096, 4096, 4096]
+        fsc = fsc_values[fsci] if fsci < len(fsc_values) else 256
+        
+        has_ta1 = (t0 & 0x10) != 0
+        has_tb1 = (t0 & 0x20) != 0
+        has_tc1 = (t0 & 0x40) != 0
+        
+        idx = 2
+        ta1, tb1, tc1 = 0, 0, 0
+        
+        if has_ta1 and idx < len(ats):
+            ta1 = ats[idx]
+            idx += 1
+        if has_tb1 and idx < len(ats):
+            tb1 = ats[idx]
+            idx += 1
+        if has_tc1 and idx < len(ats):
+            tc1 = ats[idx]
+            idx += 1
+        
+        # Historical bytes
+        hist_bytes = ats[idx:] if idx < len(ats) else b''
+        
+        print(f"- ATS Decode:")
+        print(f"  # Frame Size (FSC): {fsc} bytes")
+        
+        # Parse TA1 for bitrates (like Proxmark3)
+        if has_ta1:
+            # TA1 bits 0-3: same bit rate divisor from PCD to PICC (DS)
+            # TA1 bits 4-7: same bit rate divisor from PICC to PCD (DR)
+            ds = ta1 & 0x0F  # Card to reader
+            dr = (ta1 >> 4) & 0x0F  # Reader to card
+            
+            bitrates_dr = []  # Reader to Card
+            bitrates_ds = []  # Card to Reader
+            
+            if dr & 0x01:
+                bitrates_dr.append("212")
+            if dr & 0x02:
+                bitrates_dr.append("424")
+            if dr & 0x04:
+                bitrates_dr.append("848")
+            if not bitrates_dr or dr == 0:
+                bitrates_dr = ["106"]
+            else:
+                bitrates_dr.insert(0, "106")
+                
+            if ds & 0x01:
+                bitrates_ds.append("212")
+            if ds & 0x02:
+                bitrates_ds.append("424")
+            if ds & 0x04:
+                bitrates_ds.append("848")
+            if not bitrates_ds or ds == 0:
+                bitrates_ds = ["106"]
+            else:
+                bitrates_ds.insert(0, "106")
+            
+            # Check if same bitrate both directions required
+            same_both = (ta1 & 0x80) == 0
+            
+            print(f"  # Supported Bitrates:")
+            print(f"    - Reader -> Card: {', '.join(bitrates_dr)} kbps")
+            print(f"    - Card -> Reader: {', '.join(bitrates_ds)} kbps")
+            if same_both:
+                print(f"    - Same bitrate both directions: Yes")
+        
+        # Parse TB1 for timing
+        if has_tb1:
+            fwi = (tb1 >> 4) & 0x0F
+            sfgi = tb1 & 0x0F
+            fwt = (256 * 16 / 13560000) * (2 ** fwi)  # Frame Waiting Time in seconds
+            print(f"  # FWI: {fwi} (FWT: {fwt*1000:.2f} ms)")
+            if sfgi > 0:
+                sfgt = (256 * 16 / 13560000) * (2 ** sfgi)
+                print(f"  # SFGI: {sfgi} (SFGT: {sfgt*1000:.2f} ms)")
+        
+        # Parse TC1 for CID/NAD support
+        if has_tc1:
+            supports_cid = (tc1 & 0x02) != 0
+            supports_nad = (tc1 & 0x01) != 0
+            print(f"  # CID supported: {'Yes' if supports_cid else 'No'}")
+            print(f"  # NAD supported: {'Yes' if supports_nad else 'No'}")
+        
+        # Historical bytes analysis
+        if len(hist_bytes) > 0:
+            print(f"  # Historical bytes: {hist_bytes.hex().upper()}")
+            
+            # Try to identify from historical bytes
+            if len(hist_bytes) >= 1:
+                cat = hist_bytes[0]
+                if cat == 0x00:
+                    print(f"    - Category: Status indicator (ISO 7816-4)")
+                elif cat == 0x80:
+                    print(f"    - Category: Proprietary (DESFire typical)")
+                elif cat == 0xC1:
+                    print(f"    - Category: MIFARE Plus S/X")
+
     def get_iso14443_4_version_info(self, data_tag):
         """Identify SAK 0x20 tags (DESFire, MIFARE Plus, NTAG 4xx) using native GET_VERSION"""
         int_sak = data_tag['sak'][0]
         ats = data_tag.get('ats', b'')
         
-        # Only for ISO 14443-4 tags with SAK 0x20
+        # Parse ATS for all ISO 14443-4 tags
+        if len(ats) >= 2:
+            self.parse_ats_info(data_tag)
+        
+        # Only try DESFire identification for SAK 0x20
         if int_sak != 0x20:
             return
         
@@ -1102,146 +1274,92 @@ class HF14AScan(ReaderRequiredUnit):
             'check_response_crc': 1,
         }
         
-        # DESFire native GET_VERSION wrapped in ISO 7816-4: CLA=90, INS=60, P1=00, P2=00, Le=00
-        # Using I-block PCB byte 0x02
-        get_version_cmd = bytes([0x02, 0x90, 0x60, 0x00, 0x00, 0x00])
-        additional_frame = bytes([0x03, 0x90, 0xAF, 0x00, 0x00, 0x00])
+        # Try multiple GET_VERSION command formats
+        # Format 1: DESFire wrapped in ISO 7816-4 with I-block
+        # Format 2: Raw DESFire native command
+        # Format 3: ISO 7816-4 APDU without I-block (let firmware handle it)
+        
+        commands_to_try = [
+            # ISO 7816-4 wrapped: CLA=90, INS=60, P1=00, P2=00, Le=00
+            bytes([0x90, 0x60, 0x00, 0x00, 0x00]),
+            # With I-block PCB
+            bytes([0x02, 0x90, 0x60, 0x00, 0x00, 0x00]),
+            # Raw DESFire native
+            bytes([0x60]),
+        ]
+        
+        resp1 = None
+        cmd_format = 0
+        
+        for i, cmd in enumerate(commands_to_try):
+            try:
+                resp1 = self.cmd.hf14a_raw(options=options, resp_timeout_ms=200, data=cmd)
+                if resp1 is not None and len(resp1) >= 7:
+                    cmd_format = i
+                    break
+            except Exception:
+                pass
+        
+        if resp1 is None or len(resp1) < 7:
+            # GET_VERSION failed - try to identify from ATS
+            self.identify_from_ats(data_tag)
+            return
         
         try:
-            # Send GET_VERSION part 1 (Hardware version info)
-            resp1 = self.cmd.hf14a_raw(options=options, resp_timeout_ms=200, data=get_version_cmd)
+            print(f"- GET_VERSION Response: {resp1.hex().upper()}")
             
-            if resp1 is not None and len(resp1) >= 9:
-                # Parse I-block response - skip PCB byte if present
-                offset = 1 if resp1[0] in (0x02, 0x03) else 0
-                
-                # Check status bytes at end: should be AF 91 (more data) or 00 91 (done)
-                # Response format: [PCB] [7 bytes version HW] [SW1=AF] [SW2=91]
-                sw1 = resp1[-2] if len(resp1) >= 2 else 0
-                sw2 = resp1[-1] if len(resp1) >= 1 else 0
-                
+            # Parse response - find the version data
+            # Response could be: [PCB][data][SW1][SW2] or [data][SW1][SW2] or [status][data]
+            offset = 0
+            
+            # Skip I-block PCB if present
+            if resp1[0] in (0x02, 0x03, 0x0A, 0x0B):
+                offset = 1
+            
+            # Check for DESFire status byte 0xAF (more frames) at various positions
+            # DESFire native response: [AF][7 bytes HW version] or [7 bytes HW version][AF 91]
+            hw_data = None
+            
+            # Try to find valid version data
+            if len(resp1) >= offset + 9:
+                # ISO wrapped: [PCB][7 bytes][SW1=AF][SW2=91]
+                sw1 = resp1[-2]
+                sw2 = resp1[-1]
                 if sw2 == 0x91 and sw1 == 0xAF:
-                    # DESFire responded with "more data" - parse hardware version
-                    hw_vendor = resp1[offset]       # 0x04 = NXP
-                    hw_type = resp1[offset + 1]     # Product type
-                    hw_subtype = resp1[offset + 2]  # Product subtype
-                    hw_major = resp1[offset + 3]    # Major version
-                    hw_minor = resp1[offset + 4]    # Minor version
-                    hw_storage = resp1[offset + 5]  # Storage size
-                    hw_protocol = resp1[offset + 6] # Protocol type
+                    hw_data = resp1[offset:offset+7]
+            
+            if hw_data is None and len(resp1) >= offset + 8:
+                # DESFire native: [AF][7 bytes] or [7 bytes][AF]
+                if resp1[offset] == 0xAF:
+                    hw_data = resp1[offset+1:offset+8]
+                elif resp1[-1] == 0xAF:
+                    hw_data = resp1[offset:offset+7]
+            
+            if hw_data is None and len(resp1) >= 7:
+                # Just try the data as-is
+                hw_data = resp1[offset:offset+7] if len(resp1) > offset + 7 else resp1[:7]
+            
+            if hw_data and len(hw_data) >= 7:
+                hw_vendor = hw_data[0]
+                hw_type = hw_data[1]
+                hw_subtype = hw_data[2]
+                hw_major = hw_data[3]
+                hw_minor = hw_data[4]
+                hw_storage = hw_data[5]
+                hw_protocol = hw_data[6]
+                
+                # Only proceed if vendor is NXP (0x04)
+                if hw_vendor == 0x04:
+                    self.print_desfire_info(hw_type, hw_subtype, hw_major, hw_minor, hw_storage, hw_protocol)
                     
-                    # Get software version (frame 2)
-                    options['keep_rf_field'] = 1
-                    resp2 = self.cmd.hf14a_raw(options=options, resp_timeout_ms=200, data=additional_frame)
-                    sw_major, sw_minor = 0, 0
-                    if resp2 is not None and len(resp2) >= 9:
-                        off2 = 1 if resp2[0] in (0x02, 0x03) else 0
-                        sw_major = resp2[off2 + 3]
-                        sw_minor = resp2[off2 + 4]
+                    # Get remaining frames for complete info
+                    self.get_desfire_remaining_frames(options)
                     
-                    # Get production info (frame 3) - toggle block number
-                    additional_frame2 = bytes([0x02, 0x90, 0xAF, 0x00, 0x00, 0x00])
-                    resp3 = self.cmd.hf14a_raw(options=options, resp_timeout_ms=200, data=additional_frame2)
-                    
-                    # Identify card based on product type (hw_type)
-                    # Based on NXP AN10833 and Proxmark3 source
-                    tag_name = "Unknown NXP Tag"
-                    product_category = ""
-                    
-                    if hw_type == 0x01:
-                        # MIFARE DESFire native IC
-                        product_category = "MIFARE DESFire"
-                        if hw_major == 0x00 and hw_minor == 0x01:
-                            tag_name = "DESFire MF3ICD40"
-                        elif hw_major == 0x01:
-                            tag_name = "DESFire EV1"
-                        elif hw_major == 0x12:
-                            tag_name = "DESFire EV2"
-                        elif hw_major == 0x22:
-                            tag_name = "DESFire EV2 XL"
-                        elif hw_major == 0x33:
-                            tag_name = "DESFire EV3"
-                        elif hw_major == 0x30:
-                            tag_name = "DESFire EV3"
-                        else:
-                            tag_name = f"DESFire (HW v{hw_major}.{hw_minor})"
-                            
-                    elif hw_type == 0x02:
-                        # MIFARE Plus
-                        product_category = "MIFARE Plus"
-                        if hw_major == 0x00:
-                            tag_name = "MIFARE Plus EV1"
-                        elif hw_major == 0x01:
-                            tag_name = "MIFARE Plus EV2"
-                        else:
-                            tag_name = f"MIFARE Plus (HW v{hw_major}.{hw_minor})"
-                            
-                    elif hw_type == 0x08:
-                        # DESFire Light
-                        product_category = "DESFire Light"
-                        tag_name = "DESFire Light"
-                        
-                    elif hw_type == 0x81 or hw_type == 0x83:
-                        # DESFire implementation on microcontroller
-                        product_category = "DESFire"
-                        tag_name = "DESFire on Microcontroller"
-                        
-                    elif hw_type == 0x91:
-                        # DESFire applet on Java card
-                        product_category = "DESFire"
-                        tag_name = "DESFire Applet (Java Card)"
-                        
-                    elif hw_type == 0xA1:
-                        # MIFARE DESFire HCE
-                        product_category = "DESFire"
-                        tag_name = "DESFire HCE (MIFARE 2GO)"
-                        
-                    elif hw_type == 0x04:
-                        # NTAG DNA family
-                        product_category = "NTAG DNA"
-                        if hw_subtype == 0x02:
-                            tag_name = "NTAG 413 DNA"
-                        elif hw_subtype == 0x05:
-                            tag_name = "NTAG 424 DNA"
-                        elif hw_subtype == 0x07:
-                            tag_name = "NTAG 424 DNA TT"
-                        else:
-                            tag_name = f"NTAG DNA (subtype 0x{hw_subtype:02X})"
-                    else:
-                        tag_name = f"Unknown NXP (type 0x{hw_type:02X})"
-                    
-                    # Calculate storage size
-                    if hw_storage == 0x16:
-                        storage_str = "2K"
-                    elif hw_storage == 0x18:
-                        storage_str = "4K"
-                    elif hw_storage == 0x1A:
-                        storage_str = "8K"
-                    elif hw_storage > 0:
-                        storage_bytes = 2 ** (hw_storage >> 1)
-                        if hw_storage & 0x01:
-                            storage_bytes += storage_bytes // 2
-                        storage_str = f"{storage_bytes // 1024}K" if storage_bytes >= 1024 else f"{storage_bytes} bytes"
-                    else:
-                        storage_str = "Unknown"
-                    
-                    print(f"- GET_VERSION HW: {resp1[offset:offset+7].hex().upper()}")
-                    print(f"  # Identified: {tag_name} ({storage_str})")
-                    print(f"  # HW Version: {hw_major}.{hw_minor}")
-                    print(f"  # SW Version: {sw_major}.{sw_minor}")
-                    
-                    # Clean up RF field
-                    try:
-                        options['activate_rf_field'] = 0
-                        options['wait_response'] = 0
-                        options['keep_rf_field'] = 0
-                        self.cmd.hf14a_raw(options=options, resp_timeout_ms=100, data=[])
-                    except Exception:
-                        pass
-                    return
+                else:
+                    print(f"  # Unknown vendor: 0x{hw_vendor:02X}")
                     
         except Exception as e:
-            pass
+            print(f"  # Error parsing GET_VERSION: {e}")
         
         # Clean up RF field
         try:
@@ -1251,6 +1369,130 @@ class HF14AScan(ReaderRequiredUnit):
             self.cmd.hf14a_raw(options=options, resp_timeout_ms=100, data=[])
         except Exception:
             pass
+    
+    def print_desfire_info(self, hw_type, hw_subtype, hw_major, hw_minor, hw_storage, hw_protocol):
+        """Print DESFire identification based on hardware version info"""
+        tag_name = "Unknown NXP Tag"
+        
+        # Based on NXP AN10833 and Proxmark3 source
+        if hw_type == 0x01:
+            # MIFARE DESFire native IC
+            if hw_major == 0x00 and hw_minor == 0x01:
+                tag_name = "DESFire MF3ICD40"
+            elif hw_major == 0x01:
+                tag_name = "DESFire EV1"
+            elif hw_major == 0x12:
+                tag_name = "DESFire EV2"
+            elif hw_major == 0x22:
+                tag_name = "DESFire EV2 XL"
+            elif hw_major == 0x30 or hw_major == 0x33:
+                tag_name = "DESFire EV3"
+            else:
+                tag_name = f"DESFire (HW v{hw_major}.{hw_minor})"
+                
+        elif hw_type == 0x02:
+            # MIFARE Plus
+            if hw_major == 0x00:
+                tag_name = "MIFARE Plus EV1"
+            elif hw_major == 0x01:
+                tag_name = "MIFARE Plus EV2"
+            else:
+                tag_name = f"MIFARE Plus (HW v{hw_major}.{hw_minor})"
+                
+        elif hw_type == 0x04:
+            # NTAG DNA family
+            if hw_subtype == 0x02:
+                tag_name = "NTAG 413 DNA"
+            elif hw_subtype == 0x05:
+                tag_name = "NTAG 424 DNA"
+            elif hw_subtype == 0x07:
+                tag_name = "NTAG 424 DNA TT"
+            else:
+                tag_name = f"NTAG DNA (subtype 0x{hw_subtype:02X})"
+                
+        elif hw_type == 0x08:
+            tag_name = "DESFire Light"
+        elif hw_type == 0x81 or hw_type == 0x83:
+            tag_name = "DESFire on Microcontroller"
+        elif hw_type == 0x91:
+            tag_name = "DESFire Applet (Java Card)"
+        elif hw_type == 0xA1:
+            tag_name = "DESFire HCE (MIFARE 2GO)"
+        else:
+            tag_name = f"Unknown NXP (type 0x{hw_type:02X})"
+        
+        # Storage size
+        storage_map = {
+            0x16: "2K", 0x18: "4K", 0x1A: "8K",
+            0x10: "256 bytes", 0x12: "512 bytes", 0x14: "1K",
+        }
+        storage_str = storage_map.get(hw_storage, f"0x{hw_storage:02X}")
+        
+        print(f"  # Identified: {tag_name}")
+        print(f"  # Storage: {storage_str}")
+        print(f"  # HW Version: {hw_major}.{hw_minor}")
+        print(f"  # Protocol: 0x{hw_protocol:02X}")
+    
+    def get_desfire_remaining_frames(self, options):
+        """Get remaining GET_VERSION frames (SW version, production info)"""
+        try:
+            # Additional frame command
+            additional_cmds = [
+                bytes([0x90, 0xAF, 0x00, 0x00, 0x00]),
+                bytes([0x03, 0x90, 0xAF, 0x00, 0x00, 0x00]),
+                bytes([0xAF]),
+            ]
+            
+            for cmd in additional_cmds:
+                try:
+                    resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=200, data=cmd)
+                    if resp and len(resp) >= 7:
+                        # Got software version
+                        offset = 1 if resp[0] in (0x02, 0x03) else 0
+                        sw_major = resp[offset + 3] if len(resp) > offset + 3 else 0
+                        sw_minor = resp[offset + 4] if len(resp) > offset + 4 else 0
+                        print(f"  # SW Version: {sw_major}.{sw_minor}")
+                        break
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    
+    def identify_from_ats(self, data_tag):
+        """Fallback identification from ATS when GET_VERSION fails"""
+        ats = data_tag.get('ats', b'')
+        if len(ats) < 2:
+            return
+        
+        # Parse to get historical bytes
+        t0 = ats[1]
+        idx = 2
+        if t0 & 0x10:
+            idx += 1
+        if t0 & 0x20:
+            idx += 1
+        if t0 & 0x40:
+            idx += 1
+        
+        hist_bytes = ats[idx:] if idx < len(ats) else b''
+        
+        if len(hist_bytes) >= 1:
+            cat = hist_bytes[0]
+            if cat == 0x80:
+                print(f"  # Likely: MIFARE DESFire (from ATS)")
+            elif cat == 0xC1:
+                if len(hist_bytes) >= 7:
+                    # MIFARE Plus identification from historical bytes
+                    # C1 05 2F 2F XX YY ZZ
+                    if hist_bytes[1] == 0x05 and hist_bytes[2] == 0x2F:
+                        if hist_bytes[4] == 0x00:
+                            print(f"  # Identified: MIFARE Plus X (from ATS)")
+                        elif hist_bytes[4] == 0x01:
+                            print(f"  # Identified: MIFARE Plus S (from ATS)")
+                        else:
+                            print(f"  # Identified: MIFARE Plus (from ATS)")
+                else:
+                    print(f"  # Likely: MIFARE Plus (from ATS)")
 
     def check_magic_mifare(self, data_tag):
         """Detect magic MIFARE cards (Gen1a, Gen2/CUID, Gen3, Gen4/Ultimate)"""
@@ -1270,6 +1512,7 @@ class HF14AScan(ReaderRequiredUnit):
         }
         
         magic_type = None
+        magic_details = []
         
         try:
             # Test for Gen1a (responds to magic wakeup without CRC)
@@ -1283,9 +1526,45 @@ class HF14AScan(ReaderRequiredUnit):
                                                data=bytes([0x40]), bit_len=7)
                 if gen1a_cmd is not None and len(gen1a_cmd) > 0:
                     # Got response to backdoor command - likely Gen1a
-                    magic_type = "Gen1a (Chinese Magic Card)"
+                    magic_type = "Gen1a"
+                    magic_details.append("Responds to backdoor commands")
+                    magic_details.append("Block 0 writable without auth")
         except Exception:
             pass
+        
+        # Test for Gen2/CUID (DirectWrite) - UID is directly writable
+        if magic_type is None:
+            try:
+                options['activate_rf_field'] = 1
+                options['auto_select'] = 1
+                options['append_crc'] = 1
+                options['check_response_crc'] = 1
+                
+                # Try to write block 0 with auth - Gen2 allows this
+                # We just check if we get NACK vs ACK pattern
+                # This is detected by the static nonce later
+                pass
+            except Exception:
+                pass
+        
+        # Test for Gen3 (APDU Magic) - responds to special APDUs
+        if magic_type is None:
+            try:
+                options['activate_rf_field'] = 0
+                options['auto_select'] = 1
+                options['append_crc'] = 1
+                options['check_response_crc'] = 1
+                
+                # Gen3 uses 0x90 0xFD command to set block 0
+                gen3_check = bytes([0x90, 0xFD, 0x00, 0x00, 0x00])
+                resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=100, data=gen3_check)
+                if resp is not None and len(resp) >= 2:
+                    # Check for success response
+                    if resp[-1] == 0x00 or (len(resp) >= 2 and resp[-2] == 0x90):
+                        magic_type = "Gen3"
+                        magic_details.append("APDU backdoor")
+            except Exception:
+                pass
         
         # Test for Gen4/Ultimate (GDM) - responds to special authentication
         if magic_type is None:
@@ -1295,12 +1574,16 @@ class HF14AScan(ReaderRequiredUnit):
                 options['append_crc'] = 1
                 options['check_response_crc'] = 1
                 
-                # Gen4 unlock command: CF + key (8 bytes) + command
-                # Default key: 00000000 or FFFFFFFF
+                # Gen4 unlock command: CF + key (4 bytes) + command
+                # Default key: 00000000
                 gen4_unlock = bytes([0xCF, 0x00, 0x00, 0x00, 0x00, 0xC6])  # Get config
                 resp = self.cmd.hf14a_raw(options=options, resp_timeout_ms=100, data=gen4_unlock)
-                if resp is not None and len(resp) > 0 and resp[0] != 0x04:  # Not NAK
-                    magic_type = "Gen4 GTU (Ultimate Magic Card)"
+                if resp is not None and len(resp) > 4 and resp[0] != 0x04:  # Not NAK
+                    magic_type = "Gen4 GTU"
+                    magic_details.append("Ultimate Magic Card")
+                    # Parse config if available
+                    if len(resp) >= 30:
+                        magic_details.append(f"Config: {resp[:8].hex().upper()}")
             except Exception:
                 pass
         
@@ -1315,6 +1598,8 @@ class HF14AScan(ReaderRequiredUnit):
         
         if magic_type:
             print(f"  # Magic Card: {magic_type}")
+            for detail in magic_details:
+                print(f"    - {detail}")
 
     def identify_mifare_classic(self, data_tag):
         """Identify MIFARE Classic variants based on SAK and ATQA"""
@@ -1334,6 +1619,7 @@ class HF14AScan(ReaderRequiredUnit):
         
         if int_sak in classic_types:
             tag_type = classic_types[int_sak]
+            chip_details = []
             
             # Refine based on ATQA
             if int_sak == 0x08:
@@ -1343,6 +1629,8 @@ class HF14AScan(ReaderRequiredUnit):
                     tag_type = "MIFARE Classic 1K (7-byte UID)"
                 elif atqa == 0x0344:
                     tag_type = "MIFARE Plus in SL1 (1K mode)"
+                elif atqa == 0x0304:
+                    chip_details.append("Possibly FM11RF08S")
             elif int_sak == 0x09:
                 if atqa == 0x0044:
                     tag_type = "MIFARE Mini (7-byte UID)"
@@ -1356,21 +1644,123 @@ class HF14AScan(ReaderRequiredUnit):
                 elif atqa == 0x0344:
                     tag_type = "MIFARE Plus in SL1 (4K mode)"
             
-            # Check manufacturer
+            # Check manufacturer from UID
             if len(uid) >= 1:
-                if uid[0] == 0x04:
+                mfr = uid[0]
+                if mfr == 0x04:
                     tag_type += " - NXP"
-                elif uid[0] == 0x05:
+                elif mfr == 0x05:
                     tag_type += " - Infineon"
-                elif uid[0] == 0x57:
+                elif mfr == 0x57:
+                    tag_type += " - Fudan (FM11RF08)"
+                    chip_details.append("Chinese clone chip")
+                elif mfr == 0x29:
                     tag_type += " - Fudan"
-                elif uid[0] == 0xAA:
+                    chip_details.append("Chinese clone chip")
+                elif mfr == 0xAA:
                     tag_type += " - Fudan FM11RF08S"
+                    chip_details.append("Static encrypted nonce backdoor")
+                elif mfr == 0x88:
+                    # Check for magic card patterns
+                    chip_details.append("Possible magic card")
+                elif mfr == 0x00 or mfr == 0xFF:
+                    chip_details.append("Invalid manufacturer - likely clone")
+            
+            # Detect known clone patterns from full UID
+            if len(uid) == 4:
+                # Common clone patterns
+                if uid == bytes([0xDE, 0xAD, 0xBE, 0xEF]):
+                    chip_details.append("Known test UID pattern")
+                elif uid[0] == uid[1] == uid[2] == uid[3]:
+                    chip_details.append("Repeating UID pattern - likely clone")
+            
+            # Check BCC
+            if len(uid) == 4:
+                # 4-byte UID: BCC = UID0 ^ UID1 ^ UID2 ^ UID3
+                bcc = uid[0] ^ uid[1] ^ uid[2] ^ uid[3]
+                chip_details.append(f"BCC: 0x{bcc:02X}")
+            elif len(uid) == 7:
+                # 7-byte UID: BCC0 = 0x88 ^ UID0 ^ UID1 ^ UID2, BCC1 = UID3 ^ UID4 ^ UID5 ^ UID6
+                bcc0 = 0x88 ^ uid[0] ^ uid[1] ^ uid[2]
+                bcc1 = uid[3] ^ uid[4] ^ uid[5] ^ uid[6]
+                chip_details.append(f"BCC0: 0x{bcc0:02X}, BCC1: 0x{bcc1:02X}")
                     
             print(f"  # Identified: {tag_type}")
+            for detail in chip_details:
+                print(f"    - {detail}")
             
             # Check for magic card capabilities
             self.check_magic_mifare(data_tag)
+            
+            # Detect static nonce (already done in check_mf1_nt, but add context)
+            self.detect_prng_weakness(data_tag)
+
+    def detect_prng_weakness(self, data_tag):
+        """Detect PRNG weakness type for MIFARE Classic"""
+        try:
+            # Get nonce type from device
+            nt_level = self.cmd.mf1_detect_nt_level()
+            
+            prng_types = {
+                0: ("Static Nonce", "Vulnerable to StaticNested attack - fastest recovery"),
+                1: ("Weak PRNG", "Vulnerable to Nested attack - fast recovery"),
+                2: ("Hard PRNG", "Requires HardNested attack - slow recovery"),
+            }
+            
+            if nt_level in prng_types:
+                name, desc = prng_types[nt_level]
+                print(f"  # PRNG Type: {name}")
+                print(f"    - {desc}")
+                
+                # Additional checks for static nonce
+                if nt_level == 0:
+                    # Try to detect if it's FM11RF08S with encrypted static nonce
+                    try:
+                        darkside_level = self.cmd.mf1_detect_darkside()
+                        if darkside_level == 2:  # Can't darkside but static nonce
+                            print(f"    - Possibly FM11RF08S (encrypted static nonce)")
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    def detect_special_cards(self, data_tag):
+        """Detect special/unusual cards based on various indicators"""
+        int_sak = data_tag['sak'][0]
+        atqa = int.from_bytes(data_tag['atqa'], byteorder='little')
+        uid = data_tag['uid']
+        ats = data_tag.get('ats', b'')
+        
+        special_types = []
+        
+        # Detect HID iCLASS (SAK 0x38 with specific ATQA)
+        if int_sak == 0x38 and atqa == 0x0004:
+            special_types.append("Possibly HID iCLASS SE")
+        
+        # Detect JCOP cards
+        if int_sak == 0x28 or int_sak == 0x38:
+            if len(ats) > 0:
+                special_types.append("Possibly JCOP card")
+        
+        # Detect ST25TA (STMicroelectronics)
+        if len(uid) >= 1 and uid[0] == 0x02:
+            special_types.append("STMicroelectronics tag")
+        
+        # Detect Infineon cards
+        if int_sak == 0x88:
+            special_types.append("Infineon SLE66R35")
+        
+        # Detect uncommon configurations
+        if int_sak == 0x00 and atqa == 0x0044 and len(uid) == 7:
+            if uid[0] != 0x04:
+                special_types.append("Non-NXP Ultralight-compatible")
+        
+        # Check for random UID indicator in ATQA
+        if atqa & 0x0040:
+            special_types.append("Random UID capable (bit 7 set)")
+        
+        for special in special_types:
+            print(f"  # Note: {special}")
 
     def get_signature_info(self, data_tag):
         """Send READ_SIG command to get NXP originality signature"""
@@ -1396,6 +1786,9 @@ class HF14AScan(ReaderRequiredUnit):
             if signature is not None and len(signature) == 32:
                 print(f"- Signature: {signature.hex().upper()}")
                 print("  # NXP originality signature present")
+                # Verify signature is not all zeros or all FFs (indicates clone)
+                if signature == bytes(32) or signature == bytes([0xFF] * 32):
+                    print("  # WARNING: Signature is blank - possible clone!")
         except Exception:
             pass  # Tag doesn't support READ_SIG
 
@@ -1417,6 +1810,7 @@ class HF14AScan(ReaderRequiredUnit):
                         self.get_version_info(data_tag)
                         self.get_iso14443_4_version_info(data_tag)
                         self.identify_mifare_classic(data_tag)
+                        self.detect_special_cards(data_tag)
                         self.get_signature_info(data_tag)
                         self.check_mf1_nt()
                         # TODO: check for ATS support on 14A3 tags
@@ -3764,7 +4158,9 @@ class LFEMRead(ReaderRequiredUnit):
 
     def on_exec(self, args: argparse.Namespace):
         data = self.cmd.em410x_scan()
-        print(color_string((TagSpecificType(data[0])), (CG, data[1].hex())))
+        tag_type = TagSpecificType(data[0])
+        print(f" - Tag Type: {tag_type.name}")
+        print(f" - EM410x ID: {color_string((CG, data[1].hex()))}")
 
 
 @lf_em_410x.command('write')

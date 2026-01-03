@@ -68,16 +68,33 @@ class ArgumentParserNoExit(argparse.ArgumentParser):
         print("-" * 80)
         print(color_string((CR, self.prog)))
         lines = self.format_help().splitlines()
-        usage = lines[:lines.index('')]
-        assert usage[0].startswith('usage:')
-        usage[0] = usage[0].replace('usage:', f'{color_string((CG, "usage:"))}\n ')
-        usage[0] = usage[0].replace(self.prog, color_string((CR, self.prog)))
-        usage = [usage[0]] + [x[4:] for x in usage[1:]] + ['']
-        lines = lines[lines.index('')+1:]
-        desc = lines[:lines.index('')]
+        
+        # Find the empty line separator, handle case where there is none
+        try:
+            empty_idx = lines.index('')
+            usage = lines[:empty_idx]
+        except ValueError:
+            usage = lines
+            lines = []
+        
+        if usage and usage[0].startswith('usage:'):
+            usage[0] = usage[0].replace('usage:', f'{color_string((CG, "usage:"))}\n ')
+            usage[0] = usage[0].replace(self.prog, color_string((CR, self.prog)))
+            usage = [usage[0]] + [x[4:] if len(x) > 4 else x for x in usage[1:]] + ['']
+        else:
+            # Fallback: just print as-is
+            print('\n'.join(usage))
+            return
+            
+        if '' in lines:
+            lines = lines[lines.index('')+1:]
+        desc = lines[:lines.index('')] if '' in lines else lines
         print(color_string((CC, "\n".join(desc))))
         print('\n'.join(usage))
-        lines = lines[lines.index('')+1:]
+        if '' in lines:
+            lines = lines[lines.index('')+1:]
+        else:
+            lines = []
         if '' in lines:
             options = lines[:lines.index('')]
             lines = lines[lines.index('')+1:]

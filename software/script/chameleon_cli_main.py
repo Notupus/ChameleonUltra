@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import argparse
+import os
 import sys
+import subprocess
 import traceback
 import chameleon_com
 import colorama
@@ -11,6 +13,57 @@ import prompt_toolkit
 from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.history import FileHistory
 from chameleon_utils import CR, CG, CY, color_string
+
+
+def check_privileges():
+    """
+    Check if running with sufficient privileges for USB device access.
+    On Linux, either run as root or check for udev rules.
+    """
+    if sys.platform != 'linux':
+        return True  # Non-Linux platforms handle this differently
+    
+    # Already running as root
+    if os.geteuid() == 0:
+        return True
+    
+    # Check if user is in dialout/plugdev group (common for USB access)
+    try:
+        import grp
+        user_groups = [grp.getgrgid(g).gr_name for g in os.getgroups()]
+        if 'dialout' in user_groups or 'plugdev' in user_groups:
+            return True
+    except Exception:
+        pass
+    
+    # Check if udev rules are installed
+    udev_paths = [
+        '/etc/udev/rules.d/79-chameleon-usb-device-blacklist-dialout.rules',
+        '/usr/lib/udev/rules.d/79-chameleon-usb-device-blacklist-dialout.rules'
+    ]
+    for path in udev_paths:
+        if os.path.exists(path):
+            return True
+    
+    return False
+
+
+def escalate_privileges():
+    """
+    Re-run the script with sudo if not already privileged.
+    """
+    print(color_string((CY, "USB device access requires elevated privileges.")))
+    print(color_string((CY, "Attempting to restart with sudo...")))
+    print()
+    
+    try:
+        # Re-execute with sudo, preserving the Python interpreter and script
+        args = ['sudo', sys.executable] + sys.argv
+        os.execvp('sudo', args)
+    except Exception as e:
+        print(color_string((CR, f"Failed to escalate privileges: {e}")))
+        print(color_string((CY, "Try running with: sudo " + ' '.join([sys.executable] + sys.argv))))
+        sys.exit(1)
 
 ULTRA = r"""
                                                                 ╦ ╦╦ ╔╦╗╦═╗╔═╗
@@ -185,5 +238,10 @@ if __name__ == '__main__':
     if sys.version_info < (3, 9):
         raise Exception("This script requires at least Python 3.9")
     colorama.init(autoreset=True)
+    
+    # Check for sufficient privileges on Linux
+    if sys.platform == 'linux' and not check_privileges():
+        escalate_privileges()
+    
     chameleon_cli_unit.check_tools()
     ChameleonCLI().startCLI()

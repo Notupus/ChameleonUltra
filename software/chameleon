@@ -1,0 +1,30 @@
+#!/bin/bash
+# Chameleon Ultra CLI launcher
+# This script launches the Chameleon CLI with proper privilege handling
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Check if running from installed location or source
+if [ -f "$SCRIPT_DIR/dist/chameleon_cli_main" ]; then
+    # Use compiled binary
+    CHAMELEON_BIN="$SCRIPT_DIR/dist/chameleon_cli_main"
+elif [ -f "$SCRIPT_DIR/script/chameleon_cli_main.py" ]; then
+    # Use Python script
+    CHAMELEON_BIN="python3 $SCRIPT_DIR/script/chameleon_cli_main.py"
+else
+    echo "Error: Could not find chameleon_cli_main"
+    exit 1
+fi
+
+# Check if we need sudo
+if [ "$(id -u)" -ne 0 ]; then
+    # Check if user is in dialout or plugdev group
+    if groups | grep -qE '\b(dialout|plugdev)\b'; then
+        exec $CHAMELEON_BIN "$@"
+    else
+        # Need sudo
+        exec sudo $CHAMELEON_BIN "$@"
+    fi
+else
+    exec $CHAMELEON_BIN "$@"
+fi
