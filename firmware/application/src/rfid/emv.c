@@ -8,6 +8,17 @@
 #include "bsp_delay.h"
 #include "iso14443_4_transceiver.h"
 
+// Safe hex to string converter for APDU logging (large enough for full APDU)
+static char *hex_to_str(const uint8_t *data, size_t len) {
+    static char buf[1024];
+    size_t i;
+    for (i = 0; i < len && (i * 2) < sizeof(buf) - 2; i++) {
+        sprintf(buf + i * 2, "%02X", data[i]);
+    }
+    buf[i * 2] = 0;
+    return buf;
+}
+
 // APDU Constants
 static const uint8_t APDU_SELECT_PSE[] = {
     0x00, 0xA4, 0x04, 0x00, 0x0E, 
