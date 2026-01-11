@@ -30,3 +30,16 @@ uint64_t bytes_to_num(uint8_t *src, uint8_t len) {
     }
     return num;
 }
+
+// Converts a byte array to a static hex string (uppercase, no spaces)
+const char* hex_to_str(const uint8_t* data, uint16_t len) {
+    static char hexstr[513]; // 256 bytes max + null
+    const char hex[] = "0123456789ABCDEF";
+    if (len > 256) len = 256;
+    for (uint16_t i = 0; i < len; ++i) {
+        hexstr[i*2] = hex[(data[i] >> 4) & 0xF];
+        hexstr[i*2+1] = hex[data[i] & 0xF];
+    }
+    hexstr[len*2] = '\0';
+    return hexstr;
+}
