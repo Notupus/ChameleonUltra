@@ -22,12 +22,18 @@ bool iso14443_4_transceive(uint8_t *tx_data, uint16_t tx_len, uint8_t *rx_data, 
     // Append CRC manually
     crc_14a_append(buffer, 1 + tx_len);
     
-    uint16_t frame_len = 1 + tx_len + 2; 
-    
     int wtx_count = 0;
     const int WTX_MAX = 10; // Limit to avoid infinite loops
-    while (1) {
+    const int TIMEOUT_MS = 1000; // Total max time to wait (adjust as needed)
+    autotimer *timeout_timer = bsp_obtain_timer(0);
+    bsp_set_timer(timeout_timer, 0);
+
+    // Initial transfer before loop
+    status = pcd_14a_reader_bytes_transfer(PCD_TRANSCEIVE, buffer, 1 + tx_len + 2, buffer, &rx_bits, sizeof(buffer) * 8);
+
+    while (NO_TIMEOUT_1MS(timeout_timer, TIMEOUT_MS)) {
         if (status != STATUS_HF_TAG_OK || rx_bits < (3 * 8)) {
+            bsp_return_timer(timeout_timer);
             return false;
         }
         uint16_t rx_bytes = rx_bits / 8;
@@ -35,6 +41,7 @@ bool iso14443_4_transceive(uint8_t *tx_data, uint16_t tx_len, uint8_t *rx_data, 
         uint8_t crc_calc[2];
         crc_14a_calculate(buffer, rx_bytes - 2, crc_calc);
         if (buffer[rx_bytes - 2] != crc_calc[0] || buffer[rx_bytes - 1] != crc_calc[1]) {
+            bsp_return_timer(timeout_timer);
             return false;
         }
         uint8_t pcb_type = buffer[0] & 0xC0;
@@ -46,6 +53,7 @@ bool iso14443_4_transceive(uint8_t *tx_data, uint16_t tx_len, uint8_t *rx_data, 
             }
             *rx_len = rx_bytes - 3;
             memcpy(rx_data, &buffer[1], *rx_len);
+            bsp_return_timer(timeout_timer);
             return true;
         } else if (pcb_type == 0xC0) {
             // S-Block (WTX or DESELECT)
@@ -64,16 +72,21 @@ bool iso14443_4_transceive(uint8_t *tx_data, uint16_t tx_len, uint8_t *rx_data, 
                 rx_bits = wtx_rx_bits;
                 wtx_count++;
                 if (wtx_count > WTX_MAX) {
+                    bsp_return_timer(timeout_timer);
                     return false;
                 }
                 continue; // Wait for next frame
             } else {
                 // Other S-Blocks (not handled)
+                bsp_return_timer(timeout_timer);
                 return false;
             }
         } else {
             // R-Block or unknown (not handled)
+            bsp_return_timer(timeout_timer);
             return false;
         }
     }
+    bsp_return_timer(timeout_timer);
+    return false; // Timeout occurred
 }

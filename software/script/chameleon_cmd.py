@@ -126,9 +126,16 @@ class ChameleonCMD:
 
         :return:
         """
-        resp = self.device.send_cmd_sync(Command.HF14A_SCAN_EMV, timeout=10)
-        resp.parsed = resp.data.decode('utf-8', errors='ignore')
-        return resp
+        try:
+            resp = self.device.send_cmd_sync(Command.HF14A_SCAN_EMV, timeout=10)
+            resp.parsed = resp.data.decode('utf-8', errors='ignore')
+            return resp
+        except TimeoutError:
+            class DummyResp:
+                status = Status.HF_ERR_STAT
+                data = b''
+                parsed = 'Timeout: No response from card/device.'
+            return DummyResp()
 
     @expect_response(Status.HF_TAG_OK)
     def hf_desfire_scan(self):
