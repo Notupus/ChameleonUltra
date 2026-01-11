@@ -3,6 +3,7 @@
 #include "rfid_main.h"
 #include "nrf_log.h"
 #include <string.h>
+#include <app_status.h>
 
 static uint8_t g_pcb_block_num = 0;
 
