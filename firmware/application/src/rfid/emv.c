@@ -104,33 +104,38 @@ bool emv_scan(char *out_buffer, uint16_t max_len) {
     uint16_t last_sw = 0;
     
     out_buffer[0] = '\0';
+    int debug_len = 0;
     
     // Increase timeout for phones
     pcd_14a_reader_timeout_set(500);
+    debug_len += snprintf(out_buffer + debug_len, max_len - debug_len, "[DEBUG] Start EMV scan\n");
     
     // 1. Scan for card
     status = pcd_14a_reader_scan_auto(&tag);
     if (status != STATUS_HF_TAG_OK) {
-        snprintf(out_buffer, max_len, "No Card Found");
+        debug_len += snprintf(out_buffer + debug_len, max_len - debug_len, "[DEBUG] No Card Found\n");
+        snprintf(out_buffer + debug_len, max_len - debug_len, "No Card Found");
         return false;
     }
-    
+    debug_len += snprintf(out_buffer + debug_len, max_len - debug_len, "[DEBUG] Card found, ATS len: %d\n", tag.ats_len);
     if (tag.ats_len == 0) {
-        snprintf(out_buffer, max_len, "Card found but no ATS");
+        debug_len += snprintf(out_buffer + debug_len, max_len - debug_len, "[DEBUG] Card found but no ATS\n");
+        snprintf(out_buffer + debug_len, max_len - debug_len, "Card found but no ATS");
         return false;
     }
-    
     iso14443_4_reset_block_num();
-    
     // DELAY for Android HCE:
     // Phones need time to initialize the applet after activation.
     bsp_delay_ms(100);
+    debug_len += snprintf(out_buffer + debug_len, max_len - debug_len, "[DEBUG] After ATS and delay\n");
     
     // 2. Try Select PSE (Directory)
-    int out_len = 0;
+    int out_len = debug_len;
+    out_len += snprintf(out_buffer + out_len, max_len - out_len, "[DEBUG] Sending SELECT PSE\n");
     out_len += snprintf(out_buffer + out_len, max_len - out_len, "APDU >> %s\n", hex_to_str((uint8_t*)APDU_SELECT_PSE, sizeof(APDU_SELECT_PSE)));
     if (iso14443_4_transceive((uint8_t*)APDU_SELECT_PSE, sizeof(APDU_SELECT_PSE), rx_buf, &rx_len, sizeof(rx_buf))) {
         out_len += snprintf(out_buffer + out_len, max_len - out_len, "APDU << %s\n", hex_to_str(rx_buf, rx_len));
+        out_len += snprintf(out_buffer + out_len, max_len - out_len, "[DEBUG] SELECT PSE response len: %d\n", rx_len);
         if (rx_len >= 2) {
             last_sw = (rx_buf[rx_len-2] << 8) | rx_buf[rx_len-1];
         }
@@ -138,6 +143,7 @@ bool emv_scan(char *out_buffer, uint16_t max_len) {
         uint8_t *aid = NULL;
         uint16_t aid_len = 0;
         if (find_tag(rx_buf, rx_len, 0x84, &aid, &aid_len) == 0 || find_tag(rx_buf, rx_len, 0x4F, &aid, &aid_len) == 0) {
+            out_len += snprintf(out_buffer + out_len, max_len - out_len, "[DEBUG] Found AID in PSE, len: %d\n", aid_len);
             // Found AID in PSE, Select it
             tx_buf[0] = 0x00; tx_buf[1] = 0xA4; tx_buf[2] = 0x04; tx_buf[3] = 0x00;
             tx_buf[4] = aid_len;
@@ -146,23 +152,34 @@ bool emv_scan(char *out_buffer, uint16_t max_len) {
             out_len += snprintf(out_buffer + out_len, max_len - out_len, "APDU >> %s\n", hex_to_str(tx_buf, 5 + aid_len + 1));
             if (iso14443_4_transceive(tx_buf, 5 + aid_len + 1, rx_buf, &rx_len, sizeof(rx_buf))) {
                 out_len += snprintf(out_buffer + out_len, max_len - out_len, "APDU << %s\n", hex_to_str(rx_buf, rx_len));
+                out_len += snprintf(out_buffer + out_len, max_len - out_len, "[DEBUG] SELECT AID response len: %d\n", rx_len);
                 selection_success = true;
+            } else {
+                out_len += snprintf(out_buffer + out_len, max_len - out_len, "[DEBUG] SELECT AID transceive failed\n");
             }
+        } else {
+            out_len += snprintf(out_buffer + out_len, max_len - out_len, "[DEBUG] No AID found in PSE response\n");
         }
+    } else {
+        out_len += snprintf(out_buffer + out_len, max_len - out_len, "[DEBUG] SELECT PSE transceive failed\n");
     }
     
+    out_len += snprintf(out_buffer + out_len, max_len - out_len, "[DEBUG] Selection success: %d\n", selection_success);
     // Fallback: Direct Selection if PSE failed
     if (!selection_success) {
+        out_len += snprintf(out_buffer + out_len, max_len - out_len, "[DEBUG] Entering fallback direct selection\n");
         const uint8_t* apdus[] = {APDU_SELECT_VISA, APDU_SELECT_MC, APDU_SELECT_AMEX, APDU_SELECT_DISCOVER};
         int count = 4;
         
         for (int i=0; i<count; i++) {
+            out_len += snprintf(out_buffer + out_len, max_len - out_len, "[DEBUG] Trying direct select APDU %d\n", i);
             pcd_14a_reader_scan_auto(&tag); 
             iso14443_4_reset_block_num(); 
             bsp_delay_ms(20); // Small delay after re-activation
             out_len += snprintf(out_buffer + out_len, max_len - out_len, "APDU >> %s\n", hex_to_str((uint8_t*)apdus[i], 13));
             if (iso14443_4_transceive((uint8_t*)apdus[i], 13, rx_buf, &rx_len, sizeof(rx_buf))) { 
                 out_len += snprintf(out_buffer + out_len, max_len - out_len, "APDU << %s\n", hex_to_str(rx_buf, rx_len));
+                out_len += snprintf(out_buffer + out_len, max_len - out_len, "[DEBUG] Direct select response len: %d\n", rx_len);
                 if (rx_len >= 2) {
                     uint16_t sw = (rx_buf[rx_len-2] << 8) | rx_buf[rx_len-1];
                     if (sw == 0x9000) {
@@ -171,15 +188,18 @@ bool emv_scan(char *out_buffer, uint16_t max_len) {
                     }
                     last_sw = sw; 
                 }
+            } else {
+                out_len += snprintf(out_buffer + out_len, max_len - out_len, "[DEBUG] Direct select transceive failed\n");
             }
         }
     }
     
     if (!selection_success) {
+        out_len += snprintf(out_buffer + out_len, max_len - out_len, "[DEBUG] Selection failed, last SW: %04X\n", last_sw);
         if (last_sw != 0) {
-            snprintf(out_buffer, max_len, "Select Failed. Last SW: %04X", last_sw);
+            snprintf(out_buffer + out_len, max_len - out_len, "Select Failed. Last SW: %04X", last_sw);
         } else {
-            snprintf(out_buffer, max_len, "Select Failed (Timeout/No Resp)");
+            snprintf(out_buffer + out_len, max_len - out_len, "Select Failed (Timeout/No Resp)");
         }
         return false;
     }
@@ -187,30 +207,38 @@ bool emv_scan(char *out_buffer, uint16_t max_len) {
     // 5. Get Processing Options (GPO)
     // Using basic empty PDOL
     uint8_t gpo_apdu[] = { 0x80, 0xA8, 0x00, 0x00, 0x02, 0x83, 0x00, 0x00 };
-            out_len += snprintf(out_buffer + out_len, max_len - out_len, "APDU >> %s\n", hex_to_str(gpo_apdu, sizeof(gpo_apdu)));
-            if (!iso14443_4_transceive(gpo_apdu, sizeof(gpo_apdu), rx_buf, &rx_len, sizeof(rx_buf))) {
-                out_len += snprintf(out_buffer + out_len, max_len - out_len, "APDU << (no response)\n");
-                snprintf(out_buffer + out_len, max_len - out_len, "GPO Failed");
-                return false;
-            }
-            out_len += snprintf(out_buffer + out_len, max_len - out_len, "APDU << %s\n", hex_to_str(rx_buf, rx_len));
+    out_len += snprintf(out_buffer + out_len, max_len - out_len, "[DEBUG] Sending GPO\n");
+    out_len += snprintf(out_buffer + out_len, max_len - out_len, "APDU >> %s\n", hex_to_str(gpo_apdu, sizeof(gpo_apdu)));
+    if (!iso14443_4_transceive(gpo_apdu, sizeof(gpo_apdu), rx_buf, &rx_len, sizeof(rx_buf))) {
+        out_len += snprintf(out_buffer + out_len, max_len - out_len, "APDU << (no response)\n");
+        out_len += snprintf(out_buffer + out_len, max_len - out_len, "[DEBUG] GPO transceive failed\n");
+        snprintf(out_buffer + out_len, max_len - out_len, "GPO Failed");
+        return false;
+    }
+    out_len += snprintf(out_buffer + out_len, max_len - out_len, "APDU << %s\n", hex_to_str(rx_buf, rx_len));
+    out_len += snprintf(out_buffer + out_len, max_len - out_len, "[DEBUG] GPO response len: %d\n", rx_len);
     
     // 6. Read AFL
     uint8_t *afl = NULL;
     uint16_t afl_len = 0;
     
+    out_len += snprintf(out_buffer + out_len, max_len - out_len, "[DEBUG] Parsing AFL\n");
     if (rx_buf[0] == 0x80) {
         uint16_t l = rx_buf[1];
-        if (l > 2) { 
-             afl = &rx_buf[2 + 2];
-             afl_len = l - 2;
-        }
+           if (l > 2) { 
+               afl = &rx_buf[2 + 2];
+               afl_len = l - 2;
+               out_len += snprintf(out_buffer + out_len, max_len - out_len, "[DEBUG] AFL found in 0x80, len: %d\n", afl_len);
+           }
     } else if (rx_buf[0] == 0x77) {
         if (find_tag(rx_buf, rx_len, 0x94, &afl, &afl_len) != 0) {
              if (find_tag_raw(rx_buf, rx_len, 0x94, &afl, &afl_len) != 0) {
-                 snprintf(out_buffer, max_len, "AFL not found");
+                 out_len += snprintf(out_buffer + out_len, max_len - out_len, "[DEBUG] AFL not found in 0x77\n");
+                 snprintf(out_buffer + out_len, max_len - out_len, "AFL not found");
                  return false;
              }
+        } else {
+            out_len += snprintf(out_buffer + out_len, max_len - out_len, "[DEBUG] AFL found in 0x77, len: %d\n", afl_len);
         }
     }
     
@@ -222,20 +250,24 @@ bool emv_scan(char *out_buffer, uint16_t max_len) {
     if (find_tag(rx_buf, rx_len, 0x9F4D, &log_entry, &log_entry_len) == 0 && log_entry_len == 2) {
         log_sfi = log_entry[0];
         log_records = log_entry[1];
+        out_len += snprintf(out_buffer + out_len, max_len - out_len, "[DEBUG] Log entry found: SFI=%d, records=%d\n", log_sfi, log_records);
     }
     
     // 7. Read Records
     char card_pan[30] = "";
     char card_date[10] = "";
     
+    out_len += snprintf(out_buffer + out_len, max_len - out_len, "[DEBUG] Reading records, AFL len: %d\n", afl_len);
     for (int i = 0; i < afl_len; i += 4) {
         uint8_t sfi = afl[i] >> 3;
         uint8_t rec_start = afl[i+1];
         uint8_t rec_end = afl[i+2];
         for (uint8_t rec = rec_start; rec <= rec_end; rec++) {
+            out_len += snprintf(out_buffer + out_len, max_len - out_len, "[DEBUG] Reading record SFI=%d REC=%d\n", sfi, rec);
              uint8_t read_rec_apdu[] = { 0x00, 0xB2, rec, (sfi << 3) | 0x04, 0x00 };
              out_len += snprintf(out_buffer + out_len, max_len - out_len, "APDU >> %s\n", hex_to_str(read_rec_apdu, sizeof(read_rec_apdu)));
              if (iso14443_4_transceive(read_rec_apdu, sizeof(read_rec_apdu), rx_buf, &rx_len, sizeof(rx_buf))) {
+                 out_len += snprintf(out_buffer + out_len, max_len - out_len, "[DEBUG] Record response len: %d\n", rx_len);
                  out_len += snprintf(out_buffer + out_len, max_len - out_len, "APDU << %s\n", hex_to_str(rx_buf, rx_len));
                  uint8_t *val;
                  uint16_t val_len;
@@ -261,12 +293,17 @@ bool emv_scan(char *out_buffer, uint16_t max_len) {
                  if (card_pan[0] != '\0' && card_date[0] != '\0') break;
              } else {
                  out_len += snprintf(out_buffer + out_len, max_len - out_len, "APDU << (no response)\n");
+                 out_len += snprintf(out_buffer + out_len, max_len - out_len, "[DEBUG] Record transceive failed\n");
              }
         }
-        if (card_pan[0] != '\0' && card_date[0] != '\0') break;
+        if (card_pan[0] != '\0' && card_date[0] != '\0') {
+            out_len += snprintf(out_buffer + out_len, max_len - out_len, "[DEBUG] PAN and EXP found, breaking record read loop\n");
+            break;
+        }
     }
     
-    out_len += snprintf(out_buffer + out_len, max_len - out_len, "PAN: %s, EXP: %s", card_pan, card_date);
+    out_len += snprintf(out_buffer + out_len, max_len - out_len, "PAN: %s, EXP: %s\n", card_pan, card_date);
+    out_len += snprintf(out_buffer + out_len, max_len - out_len, "[DEBUG] EMV scan complete\n");
     
     // Log info
     if (log_sfi != 0 && log_records > 0) {
