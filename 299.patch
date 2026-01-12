@@ -1,0 +1,365 @@
+From 50f72653dbf6949d8d2b9fe74facd077de9dfd9e Mon Sep 17 00:00:00 2001
+From: dxl <64101226@qq.com>
+Date: Fri, 19 Sep 2025 12:45:32 +0800
+Subject: [PATCH 1/7] Fix the bug that cannot be compiled on the MSYS2
+ platform.
+
+---
+ firmware/bootloader/Makefile | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/firmware/bootloader/Makefile b/firmware/bootloader/Makefile
+index 52c00966..afca5cec 100644
+--- a/firmware/bootloader/Makefile
++++ b/firmware/bootloader/Makefile
+@@ -259,7 +259,8 @@ include $(TEMPLATE_PATH)/Makefile.common
+ 
+ # tolerate warnings in newer gcc versions
+ # need to be called after $(TEMPLATE_PATH)/Makefile.common
+-CC_VERSION = $(shell $(CC) -dumpversion 2>/dev/null|sed 's/\..*//')
++# The return value of the Windows+msys2 build platform has carriage returns and line breaks, which need to be removed.
++CC_VERSION = $(shell $(CC) -dumpversion 2>/dev/null | tr -d '\r' | cut -d. -f1)
+ CC_VERSION := $(or $(strip $(CC_VERSION)),0)
+ ifeq ($(shell expr $(CC_VERSION) \>= 12), 1)
+     # avoid a couple of false warnings in nRF SDK
+
+From d065a2f18eef3fb556e945fc29b6a81f837b614f Mon Sep 17 00:00:00 2001
+From: dxl <64101226@qq.com>
+Date: Tue, 23 Sep 2025 00:32:17 +0800
+Subject: [PATCH 2/7] Improve the efficiency of USB packet reception.
+
+---
+ firmware/application/src/usb_main.c | 27 ++++++++++++---------------
+ 1 file changed, 12 insertions(+), 15 deletions(-)
+
+diff --git a/firmware/application/src/usb_main.c b/firmware/application/src/usb_main.c
+index 3cc0d8fb..d0525b31 100644
+--- a/firmware/application/src/usb_main.c
++++ b/firmware/application/src/usb_main.c
+@@ -40,19 +40,19 @@ APP_USBD_CDC_ACM_GLOBAL_DEF(m_app_cdc_acm,
+ volatile bool g_usb_connected = false;
+ volatile bool g_usb_port_opened = false;
+ volatile bool g_usb_led_marquee_enable = true;
++static uint8_t cdc_data_buffer[NRF_DRV_USBD_EPSIZE];
+ 
+ /** @brief User event handler @ref app_usbd_cdc_acm_user_ev_handler_t */
+ static void cdc_acm_user_ev_handler(app_usbd_class_inst_t const *p_inst, app_usbd_cdc_acm_user_event_t event) {
+-    static uint8_t cdc_data_buffer[1];
++
+     // app_usbd_cdc_acm_t const *p_cdc_acm = app_usbd_cdc_acm_class_get(p_inst);
+ 
+     switch (event) {
+         case APP_USBD_CDC_ACM_USER_EVT_PORT_OPEN: {
+-            /*
+-             *theProbabilityOfTheEntireUsbReceivingDataIsTheAppUsbdCdcAcmRead *AppUsbdCdcAcmReadFunctionIsNotASeriousReception,ItIsGivenAPointer,AndThenWaitForTheUsbBuffer *SoYouNeedToInitializeTheHeadPointerFirstWhenTheAppUsbdCdcAcmUserEvtPortOpenIsInitialized *IfTheAppUsbdCdcAcmUserEvtRxDoneUsesASubscribed0ToAccessTheBuffer,ItWillCauseTheFirstByteToLoseTheFirstSendEssence
+-             */
+-            ret_code_t ret = app_usbd_cdc_acm_read(&m_app_cdc_acm, cdc_data_buffer, 1);
++            // Setup first transfer
++            ret_code_t ret = app_usbd_cdc_acm_read_any(&m_app_cdc_acm, cdc_data_buffer, sizeof(cdc_data_buffer));
+             UNUSED_VARIABLE(ret);
++
+             NRF_LOG_INFO("CDC ACM port opened");
+             g_usb_port_opened = true;
+             break;
+@@ -68,16 +68,13 @@ static void cdc_acm_user_ev_handler(app_usbd_class_inst_t const *p_inst, app_usb
+             break;
+ 
+         case APP_USBD_CDC_ACM_USER_EVT_RX_DONE: {
+-            ret_code_t ret;
+-            //Take out the first byte first
+-            data_frame_receive(cdc_data_buffer, 1);
+-            do {
+-                ret = app_usbd_cdc_acm_read(&m_app_cdc_acm, cdc_data_buffer, 1);
+-                if (ret == NRF_SUCCESS) {
+-                    // The byte after success
+-                    data_frame_receive(cdc_data_buffer, 1);
+-                }
+-            } while (ret == NRF_SUCCESS);
++            // Get amount of data transfered to process data
++            size_t size = app_usbd_cdc_acm_rx_size(&m_app_cdc_acm);
++            data_frame_receive(cdc_data_buffer, size);
++
++            // Setup next transfer
++            ret_code_t ret = app_usbd_cdc_acm_read_any(&m_app_cdc_acm, cdc_data_buffer, sizeof(cdc_data_buffer));
++            UNUSED_VARIABLE(ret);
+             break;
+         }
+         default:
+
+From 0448a369a3bed1ccf74613218301dc3bc9e7cdab Mon Sep 17 00:00:00 2001
+From: dxl <64101226@qq.com>
+Date: Tue, 23 Sep 2025 00:33:05 +0800
+Subject: [PATCH 3/7] Fixed a bug where the parameters were abnormal but the
+ subsequent logic was still executed.
+
+---
+ firmware/application/src/app_cmd.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/firmware/application/src/app_cmd.c b/firmware/application/src/app_cmd.c
+index a48b27e0..88cdf4c4 100644
+--- a/firmware/application/src/app_cmd.c
++++ b/firmware/application/src/app_cmd.c
+@@ -996,7 +996,7 @@ static data_frame_tx_t *cmd_processor_mf1_write_emu_block_data(uint16_t cmd, uin
+     uint8_t block_index = data[0];
+     uint8_t block_count = (length - 1) / NFC_TAG_MF1_DATA_SIZE;
+     if (block_index + block_count > NFC_TAG_MF1_BLOCK_MAX) {
+-        status = STATUS_PAR_ERR;
++       return data_frame_make(cmd, STATUS_SUCCESS, 0, NULL);
+     }
+     tag_data_buffer_t *buffer = get_buffer_by_tag_type(TAG_TYPE_MIFARE_4096);
+     nfc_tag_mf1_information_t *info = (nfc_tag_mf1_information_t *)buffer->buffer;
+
+From 1e8758bc1fe3b708d2be40a17b3a1286a58438ff Mon Sep 17 00:00:00 2001
+From: dxl <64101226@qq.com>
+Date: Tue, 23 Sep 2025 00:38:01 +0800
+Subject: [PATCH 4/7] Fixed bug that caused NFC peripheral devices to always
+ respond with incorrect data due to special condition.
+
+---
+ firmware/application/src/rfid/nfctag/hf/nfc_14a.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/firmware/application/src/rfid/nfctag/hf/nfc_14a.c b/firmware/application/src/rfid/nfctag/hf/nfc_14a.c
+index 043f0e4d..e237e1d6 100644
+--- a/firmware/application/src/rfid/nfctag/hf/nfc_14a.c
++++ b/firmware/application/src/rfid/nfctag/hf/nfc_14a.c
+@@ -349,7 +349,7 @@ void nfc_tag_14a_data_process(uint8_t *p_data) {
+                 m_tag_state_14a = NFC_TAG_STATE_14A_READY;
+                 // After receiving the WUPA or REQA instruction, we need to reply to ATQA
+                 nfc_tag_14a_tx_bytes(auto_coll_res->atqa, 2, false);
+-                // NRF_LOG_INFO("ATQA reply.");
++                // NRF_LOG_INFO("ATQA reply: %02x%02x", auto_coll_res->atqa[0], auto_coll_res->atqa[1]);
+             } else {
+                 m_tag_state_14a = NFC_TAG_STATE_14A_IDLE;
+                 NRF_LOG_INFO("Auto anti-collision resource no exists.");
+@@ -571,6 +571,12 @@ void nfc_tag_14a_event_callback(nrfx_nfct_evt_t const *p_event) {
+             TAG_FIELD_LED_OFF()
+             m_tag_state_14a = NFC_TAG_STATE_14A_IDLE;
+ 
++            // Fix a bug where certain special conditions prevent triggering TX start events and actually transmit incorrect data to the card reader.
++            // After more more more testing, I found that simply going into sleep mode and restarting can restore work. 
++            // Therefore, I suspect that there may be some issues with the NFC peripheral that require a reset to resolve.
++            nrf_nfct_task_trigger(NRF_NFCT_TASK_DISABLE);
++            nrf_nfct_task_trigger(NRF_NFCT_TASK_ACTIVATE);
++
+             NRF_LOG_INFO("HF FIELD LOST");
+             break;
+         }
+
+From 0858e325e5c2b0d55cf31a1d26119f0f9601f044 Mon Sep 17 00:00:00 2001
+From: dxl <64101226@qq.com>
+Date: Tue, 23 Sep 2025 00:43:17 +0800
+Subject: [PATCH 5/7] Fix the bug where HEX printing of large data packets
+ caused it to freeze.
+
+---
+ firmware/application/src/utils/dataframe.c | 24 ++++++++++++++--------
+ 1 file changed, 15 insertions(+), 9 deletions(-)
+
+diff --git a/firmware/application/src/utils/dataframe.c b/firmware/application/src/utils/dataframe.c
+index a2baad04..9874f5b3 100644
+--- a/firmware/application/src/utils/dataframe.c
++++ b/firmware/application/src/utils/dataframe.c
+@@ -28,6 +28,11 @@ static uint8_t compute_lrc(uint8_t *buf, uint16_t bufsize) {
+     return 0x100 - lrc;
+ }
+ 
++//
++//  !!!!!!!!!!!!!!!!! NRF_LOG_HEXDUMP_INFO() printing long data can cause freezing and needs to be fixed. !!!!!!!!!!!!!!!!!
++//  FIXME.
++//
++
+ /**
+  * @brief: create a packet, put the created data packet into the buffer, and wait for the post to set up a non busy state
+  * @param cmd: instructionResponse
+@@ -44,10 +49,11 @@ data_frame_tx_t *data_frame_make(uint16_t cmd, uint16_t status, uint16_t data_le
+         NRF_LOG_ERROR("data_frame_make error, too much data.");
+         return NULL;
+     }
+-    NRF_LOG_INFO("TX Data frame: cmd = 0x%04x (%i), status = 0x%04x, length = %d%s", cmd, cmd, status, data_length, data_length > 0 ? ", data =" : "");
+-    if (data_length > 0) {
+-        NRF_LOG_HEXDUMP_INFO(data, data_length);
+-    }
++
++    // NRF_LOG_INFO("TX Data frame: cmd = 0x%04x (%i), status = 0x%04x, length = %d%s", cmd, cmd, status, data_length, data_length > 0 ? ", data =" : "");
++    // if (data_length > 0) {
++    //     NRF_LOG_HEXDUMP_INFO(data, data_length);
++    // }
+ 
+     netdata_frame_postamble_t *tx_post = (netdata_frame_postamble_t *)((uint8_t *)&m_netdata_frame_tx_buf + sizeof(netdata_frame_preamble_t) + data_length);
+     // sof
+@@ -92,7 +98,7 @@ void data_frame_receive(uint8_t *data, uint16_t length) {
+         return;
+     }
+     // buffer overflow
+-    if (m_data_rx_position + length >= sizeof(m_netdata_frame_rx_buf)) {
++    if (m_data_rx_position + length > sizeof(m_netdata_frame_rx_buf)) {
+         NRF_LOG_ERROR("Data frame wait overflow.");
+         data_frame_reset();
+         return;
+@@ -142,10 +148,10 @@ void data_frame_receive(uint8_t *data, uint16_t length) {
+                     // and we are receive completed
+                     m_data_buffer = m_data_len > 0 ? (uint8_t *)&m_netdata_frame_rx_buf.data : NULL;
+                     m_data_completed = true;
+-                    NRF_LOG_INFO("RX Data frame: cmd = 0x%04x (%i), status = 0x%04x, length = %d%s", m_data_cmd, m_data_cmd, m_data_status, m_data_len, m_data_len > 0 ? ", data =" : "");
+-                    if (m_data_len > 0) {
+-                        NRF_LOG_HEXDUMP_INFO(m_data_buffer, m_data_len);
+-                    }
++                    // NRF_LOG_INFO("RX Data frame: cmd = 0x%04x (%i), status = 0x%04x, length = %d%s", m_data_cmd, m_data_cmd, m_data_status, m_data_len, m_data_len > 0 ? ", data =" : "");
++                    // if (m_data_len > 0) {
++                    //     NRF_LOG_HEXDUMP_INFO(m_data_buffer, m_data_len);
++                    // }
+                 } else {
+                     // data frame lrc error
+                     NRF_LOG_ERROR("Data frame finally lrc error.");
+
+From 67357feba0a77b4ccfdb793da785d3b39349e58f Mon Sep 17 00:00:00 2001
+From: dxl <64101226@qq.com>
+Date: Tue, 23 Sep 2025 00:56:55 +0800
+Subject: [PATCH 6/7] Parameter error should return STATUS_PAR_ERR
+
+---
+ firmware/application/src/app_cmd.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/firmware/application/src/app_cmd.c b/firmware/application/src/app_cmd.c
+index 88cdf4c4..33f39a35 100644
+--- a/firmware/application/src/app_cmd.c
++++ b/firmware/application/src/app_cmd.c
+@@ -996,7 +996,7 @@ static data_frame_tx_t *cmd_processor_mf1_write_emu_block_data(uint16_t cmd, uin
+     uint8_t block_index = data[0];
+     uint8_t block_count = (length - 1) / NFC_TAG_MF1_DATA_SIZE;
+     if (block_index + block_count > NFC_TAG_MF1_BLOCK_MAX) {
+-       return data_frame_make(cmd, STATUS_SUCCESS, 0, NULL);
++       return data_frame_make(cmd, STATUS_PAR_ERR, 0, NULL);
+     }
+     tag_data_buffer_t *buffer = get_buffer_by_tag_type(TAG_TYPE_MIFARE_4096);
+     nfc_tag_mf1_information_t *info = (nfc_tag_mf1_information_t *)buffer->buffer;
+
+From dabf1a415fe01ae90ccd67f97686e65fcd65cc4b Mon Sep 17 00:00:00 2001
+From: dxl <64101226@qq.com>
+Date: Tue, 23 Sep 2025 11:08:27 +0800
+Subject: [PATCH 7/7] Use a more thorough NFC peripheral reset strategy.
+
+---
+ .../application/src/rfid/nfctag/hf/nfc_14a.c  | 40 ++++++++++++++++++-
+ .../modules/nrfx/drivers/src/nrfx_nfct.c      | 37 ++++++++---------
+ 2 files changed, 55 insertions(+), 22 deletions(-)
+
+diff --git a/firmware/application/src/rfid/nfctag/hf/nfc_14a.c b/firmware/application/src/rfid/nfctag/hf/nfc_14a.c
+index e237e1d6..cb7a9a21 100644
+--- a/firmware/application/src/rfid/nfctag/hf/nfc_14a.c
++++ b/firmware/application/src/rfid/nfctag/hf/nfc_14a.c
+@@ -523,6 +523,43 @@ void nfc_tag_14a_data_process(uint8_t *p_data) {
+     }
+ }
+ 
++// Copy from nrf_nfct.c and modified for nrf52840 adapted(no verify on nrf52832)
++static inline void nrf_nfct_reset(void) {
++    uint32_t                       fdm;
++    uint32_t                       int_enabled;
++
++    // Save parameter settings before the reset of the NFCT peripheral.
++    fdm         = nrf_nfct_frame_delay_max_get();
++    int_enabled = nrf_nfct_int_enable_get();
++
++    // Reset the NFCT peripheral.
++    *(volatile uint32_t *)0x40005FFC = 0;
++    *(volatile uint32_t *)0x40005FFC;
++    *(volatile uint32_t *)0x40005FFC = 1;
++
++    // Restore parameter settings after the reset of the NFCT peripheral.
++    nrf_nfct_frame_delay_max_set(fdm);
++
++    // Use Window Grid frame delay mode.
++    nrf_nfct_frame_delay_mode_set(NRF_NFCT_FRAME_DELAY_MODE_WINDOWGRID);
++
++    /* Begin: Workaround for anomaly 25 */
++    /* Workaround for wrong SENSRES values require using SDD00001, but here SDD00100 is used
++       because it is required to operate with Windows Phone */
++    nrf_nfct_sensres_bit_frame_sdd_set(NRF_NFCT_SENSRES_BIT_FRAME_SDD_00100);
++    /* End: Workaround for anomaly 25 */
++
++    // Restore interrupts.
++    nrf_nfct_int_enable(int_enabled);
++
++    // Disable interrupts associated with data exchange.
++    nrf_nfct_int_disable(NRF_NFCT_INT_RXFRAMESTART_MASK | 
++        NRF_NFCT_INT_RXFRAMEEND_MASK   | 
++        NRF_NFCT_INT_RXERROR_MASK      | 
++        NRF_NFCT_INT_TXFRAMESTART_MASK | 
++        NRF_NFCT_INT_TXFRAMEEND_MASK);
++}
++
+ static inline void nfc_fdt_reset(void) {
+     // STOP TX
+     *(volatile uint32_t *)0x40005010 = 0x01;
+@@ -574,8 +611,7 @@ void nfc_tag_14a_event_callback(nrfx_nfct_evt_t const *p_event) {
+             // Fix a bug where certain special conditions prevent triggering TX start events and actually transmit incorrect data to the card reader.
+             // After more more more testing, I found that simply going into sleep mode and restarting can restore work. 
+             // Therefore, I suspect that there may be some issues with the NFC peripheral that require a reset to resolve.
+-            nrf_nfct_task_trigger(NRF_NFCT_TASK_DISABLE);
+-            nrf_nfct_task_trigger(NRF_NFCT_TASK_ACTIVATE);
++            nrf_nfct_reset();
+ 
+             NRF_LOG_INFO("HF FIELD LOST");
+             break;
+diff --git a/firmware/nrf52_sdk/modules/nrfx/drivers/src/nrfx_nfct.c b/firmware/nrf52_sdk/modules/nrfx/drivers/src/nrfx_nfct.c
+index 9c30476a..24356125 100644
+--- a/firmware/nrf52_sdk/modules/nrfx/drivers/src/nrfx_nfct.c
++++ b/firmware/nrf52_sdk/modules/nrfx/drivers/src/nrfx_nfct.c
+@@ -818,29 +818,9 @@ void nrfx_nfct_irq_handler(void)
+ 
+         NRFX_NFCT_CB_HANDLE(m_nfct_cb.config.cb, nfct_evt);
+ 
+-        /* Clear TXFRAMESTART EVENT so it can be checked in hal_nfc_send */
+-        nrf_nfct_event_clear(NRF_NFCT_EVENT_TXFRAMESTART);
+-
+         NRFX_LOG_DEBUG("Rx fend");
+     }
+ 
+-    if (NRFX_NFCT_EVT_ACTIVE(TXFRAMEEND))
+-    {
+-        nrf_nfct_event_clear(NRF_NFCT_EVENT_TXFRAMEEND);
+-
+-        nrfx_nfct_evt_t nfct_evt =
+-        {
+-            .evt_id = NRFX_NFCT_EVT_TX_FRAMEEND
+-        };
+-
+-        /* Disable TX END event to ignore frame transmission other than READ response */
+-        nrf_nfct_int_disable(NRFX_NFCT_TX_INT_MASK);
+-
+-        NRFX_NFCT_CB_HANDLE(m_nfct_cb.config.cb, nfct_evt);
+-
+-        NRFX_LOG_DEBUG("Tx fend");
+-    }
+-
+     if (NRFX_NFCT_EVT_ACTIVE(SELECTED))
+     {
+         nrf_nfct_event_clear(NRF_NFCT_EVENT_SELECTED);
+@@ -913,6 +893,23 @@ void nrfx_nfct_irq_handler(void)
+             m_nfct_cb.config.cb(&nfct_evt);
+         }
+     }
++
++    if (NRFX_NFCT_EVT_ACTIVE(TXFRAMEEND))
++    {
++        nrf_nfct_event_clear(NRF_NFCT_EVENT_TXFRAMEEND);
++
++        nrfx_nfct_evt_t nfct_evt =
++        {
++            .evt_id = NRFX_NFCT_EVT_TX_FRAMEEND
++        };
++
++        /* Disable TX END event to ignore frame transmission other than READ response */
++        nrf_nfct_int_disable(NRFX_NFCT_TX_INT_MASK);
++
++        NRFX_NFCT_CB_HANDLE(m_nfct_cb.config.cb, nfct_evt);
++
++        NRFX_LOG_DEBUG("Tx fend");
++    }
+ }
+ 
+ #endif // NRFX_CHECK(NRFX_NFCT_ENABLED)
